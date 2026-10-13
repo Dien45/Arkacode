@@ -8,8 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -17,7 +18,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,211 +27,284 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
 import com.arkacode.app.net.OpenCodeClient
+import com.arkacode.app.net.SessionInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private const val DEFAULT_PASSWORD = "arkacode-local"
+
+private sealed interface Screen {
+    data class Boot(val attempt: Int) : Screen
+    data class Ready(val version: String) : Screen
+    data object Stopped : Screen
+}
 
 /**
- * Layar debug F0: status engine opencode + distro + serve.
- * Langkah di HP: 1) Setup distro → 2) Download engine → 3) Start server → 4) Health check.
+ * F0+: layar log auto-provisioning. Buka app → semuanya jalan sendiri
+ * (cek server lama → distro → engine → start → health). Baru kalau server
+ * sudah jalan, frontend ditampilkan.
  */
 @Composable
 fun EngineScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember { EngineManager(context) }
+    val port = EngineConfig.DEFAULT_PORT
 
-    var distroInfo by remember { mutableStateOf("belum dicek") }
-    var engineInfo by remember { mutableStateOf("belum dicek") }
-    var serverInfo by remember { mutableStateOf("berhenti") }
-    var busy by remember { mutableStateOf(false) }
-    var downloadPct by remember { mutableIntStateOf(-1) }
-    var distroPct by remember { mutableIntStateOf(-1) }
-    var logTail by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    var diagOut by remember { mutableStateOf<String?>(null) }
-    var assetInfo by remember { mutableStateOf("") }
-    var portText by remember { mutableStateOf(EngineConfig.DEFAULT_PORT.toString()) }
-    var password by remember { mutableStateOf("arkacode-local") }
+    var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
+    var lines by remember { mutableStateOf(listOf<String>()) }
+    var failMsg by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
 
-    fun refresh() {
-        scope.launch {
+    fun stamp(): String =
+        SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+
+    fun log(s: String) {
+        lines = (lines + "[${stamp()}] $s").takeLast(300)
+    }
+
+    suspend fun pipeline() {
+        working = true
+        failMsg = null
+        try {
+            // 0. Server lama masih hidup? Langsung masuk.
+            log("cek server lama di port $port…")
+            val alive = runCatching {
+                OpenCodeClient(port = port, password = DEFAULT_PASSWORD).health()
+            }.getOrNull()
+            if (alive?.healthy == true) {
+                log("server sudah jalan v${alive.version}, langsung masuk.")
+                screen = Screen.Ready(alive.version)
+                return
+            }
+            // 1. Distro
             val distro = withContext(Dispatchers.IO) { engine.distroStatus() }
-            distroInfo = distro.message
-            val downloaded = withContext(Dispatchers.IO) { engine.isDownloaded() }
-            engineInfo = if (downloaded) {
-                withContext(Dispatchers.IO) { engine.version() } ?: "binary ada (distro belum siap cek versi)"
+            if (!distro.installed) {
+                log("Alpine belum ada — mengunduh & mengekstrak (±4 MB)…")
+                var last = -1
+                engine.setupDistro { p, label ->
+                    if (p / 10 != last / 10) {
+                        last = p
+                        scope.launch { log("distro $p% — $label") }
+                    }
+                }.getOrThrow()
+                log("distro siap.")
             } else {
-                "belum diunduh"
+                log("distro siap (${distro.message}).")
             }
-            serverInfo = if (engine.isRunning()) "jalan (port $portText)" else "berhenti"
-            assetInfo = withContext(Dispatchers.IO) { engine.downloadedAsset() ?: "-" }
-            logTail = withContext(Dispatchers.IO) { engine.tailLog() }
+            // 2. Engine
+            if (!withContext(Dispatchers.IO) { engine.isDownloaded() }) {
+                log("mengunduh opencode ${EngineConfig.VERSION} (±60 MB)…")
+                var last = -1
+                val v = engine.ensureInstalled {
+                    if (it / 10 != last / 10) {
+                        last = it
+                        scope.launch { log("engine $it%") }
+                    }
+                }.getOrThrow()
+                log("engine: $v")
+            } else {
+                val v = withContext(Dispatchers.IO) { engine.version() } ?: "siap"
+                log("engine sudah ada ($v).")
+            }
+            // 3. Start + health (termasuk pasang lib C++ sekali bila perlu)
+            log("menyalakan server di port $port…")
+            engine.startServer(port, DEFAULT_PASSWORD).getOrThrow()
+            val h = OpenCodeClient(port = port, password = DEFAULT_PASSWORD).health()
+            log("server jalan v${h.version}.")
+            screen = Screen.Ready(h.version)
+        } catch (e: Exception) {
+            val msg = e.message ?: "gagal"
+            log("GAGAL: $msg")
+            failMsg = msg
+        } finally {
+            working = false
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    when (val s = screen) {
+        is Screen.Boot -> {
+            LaunchedEffect(s.attempt) { pipeline() }
+            BootScreen(
+                lines = lines,
+                working = working,
+                failMsg = failMsg,
+                onRetry = {
+                    lines = emptyList()
+                    screen = Screen.Boot(s.attempt + 1)
+                },
+            )
+        }
+        is Screen.Ready -> ReadyScreen(
+            version = s.version,
+            port = port,
+            engine = engine,
+            onStop = {
+                engine.stopServer()
+                lines = lines + "[${stamp()}] server dihentikan."
+                screen = Screen.Stopped
+            },
+        )
+        Screen.Stopped -> {
+            val listState = rememberLazyListState()
+            LaunchedEffect(lines.size) {
+                if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
+            }
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Server dihentikan.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Button(
+                    onClick = { screen = Screen.Boot(0) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Start lagi") }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(lines, key = { it }) { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+    }
+}
 
-    fun runJob(block: suspend () -> Unit) {
-        error = null
-        busy = true
+@Composable
+private fun BootScreen(
+    lines: List<String>,
+    working: Boolean,
+    failMsg: String?,
+    onRetry: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Menyiapkan opencode…",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            if (working) CircularProgressIndicator()
+        }
+        if (working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        failMsg?.let {
+            Text("Gagal: $it", color = MaterialTheme.colorScheme.error)
+            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Coba lagi") }
+        }
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(lines, key = { it }) { line ->
+                    Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadyScreen(
+    version: String,
+    port: Int,
+    engine: EngineManager,
+    onStop: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var sessions by remember { mutableStateOf<List<SessionInfo>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+
+    fun load() {
+        loading = true
         scope.launch {
-            try {
-                block()
-            } catch (e: Exception) {
-                error = e.message ?: "gagal"
-            } finally {
-                busy = false
-                refresh()
-            }
+            sessions = runCatching {
+                withContext(Dispatchers.IO) {
+                    OpenCodeClient(port = port, password = DEFAULT_PASSWORD).listSessions()
+                }
+            }.getOrNull()
+            loading = false
         }
     }
+
+    LaunchedEffect(Unit) { load() }
 
     Column(
         Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Arkacode — Engine opencode (F0)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("opencode v${EngineConfig.VERSION} di proot Alpine", style = MaterialTheme.typography.bodySmall)
-
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Distro: $distroInfo", style = MaterialTheme.typography.bodyMedium)
-                Text("Engine: $engineInfo", style = MaterialTheme.typography.bodyMedium)
-                Text("Asset: $assetInfo", style = MaterialTheme.typography.bodyMedium)
-                Text("Server: $serverInfo", style = MaterialTheme.typography.bodyMedium)
-                error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
-            }
-        }
-
-        if (distroPct in 0..100) LinearProgressIndicator(progress = { distroPct / 100f }, modifier = Modifier.fillMaxWidth())
-        if (downloadPct in 0..100) LinearProgressIndicator(progress = { downloadPct / 100f }, modifier = Modifier.fillMaxWidth())
-        if (busy) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CircularProgressIndicator(Modifier.padding(4.dp))
-            Text("bekerja…")
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = portText,
-                onValueChange = { portText = it.filter(Char::isDigit).take(5) },
-                label = { Text("Port") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        Button(
-            onClick = {
-                runJob {
-                    distroPct = 0
-                    engine.setupDistro { p, _ -> distroPct = p }.getOrThrow()
-                    distroPct = -1
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("1. Setup distro Alpine") }
-
-        Button(
-            onClick = {
-                runJob {
-                    downloadPct = 0
-                    val v = engine.ensureInstalled { downloadPct = it }.getOrThrow()
-                    engineInfo = v
-                    downloadPct = -1
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("2. Download engine opencode") }
-
-        OutlinedButton(
-            onClick = {
-                runJob {
-                    diagOut = withContext(Dispatchers.IO) { engine.execSelfTest() }
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Tes exec proot (echo/abi/pagesize/ls)") }
-
-        Button(
-            onClick = {
-                runJob {
-                    val port = portText.toIntOrNull() ?: EngineConfig.DEFAULT_PORT
-                    engine.startServer(port, password).getOrThrow()
-                }
-            },
-            enabled = !busy && !engine.isRunning(),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("3. Start server") }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = {
-                    runJob {
-                        val port = portText.toIntOrNull() ?: EngineConfig.DEFAULT_PORT
-                        val h = OpenCodeClient(port = port, password = password).health()
-                        serverInfo = "OK healthy=${h.healthy} v${h.version}"
-                    }
-                },
-                enabled = !busy,
-                modifier = Modifier.weight(1f),
-            ) { Text("Health check") }
-            OutlinedButton(
-                onClick = {
-                    engine.stopServer()
-                    refresh()
-                },
-                modifier = Modifier.weight(1f),
-            ) { Text("Stop") }
-            OutlinedButton(
-                onClick = { refresh() },
-                modifier = Modifier.weight(1f),
-            ) { Text("Refresh") }
-        }
-
-        diagOut?.let {
-            Text("Hasil tes exec:", style = MaterialTheme.typography.labelMedium)
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("Arkacode", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    it.ifBlank { "(kosong)" },
+                    "server jalan · opencode v$version · port $port",
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(10.dp),
                 )
             }
+            OutlinedButton(onClick = onStop) { Text("Stop") }
         }
-        Text("serve.log:", style = MaterialTheme.typography.labelMedium)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Sesi (${sessions?.size ?: "…"})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { load() }, enabled = !loading) { Text("Muat ulang") }
+        }
+        val list = sessions
+        if (list == null) {
+            Text(if (loading) "memuat…" else "gagal memuat sesi.", style = MaterialTheme.typography.bodyMedium)
+        } else if (list.isEmpty()) {
             Text(
-                logTail.ifBlank { "(kosong)" },
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(10.dp),
+                "Belum ada sesi. Chat menyusul di F1 — untuk sekarang kelola sesi dari TUI/CLI bila perlu.",
+                style = MaterialTheme.typography.bodyMedium,
             )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                list.take(50).forEach { s ->
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(s.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
+                            Text(s.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }

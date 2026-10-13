@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Credentials
@@ -13,6 +14,7 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 data class ServerHealth(val healthy: Boolean, val version: String)
+data class SessionInfo(val id: String, val title: String)
 
 /**
  * Klien HTTP minimal untuk `opencode serve` (F0: health + GET mentah).
@@ -44,6 +46,24 @@ class OpenCodeClient(
                 healthy = obj["healthy"]?.jsonPrimitive?.booleanOrNull == true,
                 version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "?",
             )
+        }
+    }
+
+    /** Daftar sesi di server (id + judul, parsing longgar). */
+    suspend fun listSessions(): List<SessionInfo> = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$baseUrl/session")
+            .header("Authorization", authHeader())
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            runCatching {
+                json.parseToJsonElement(resp.body?.string() ?: "").jsonArray.mapNotNull { el ->
+                    val o = el.jsonObject
+                    val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    SessionInfo(id, o["title"]?.jsonPrimitive?.contentOrNull ?: "")
+                }
+            }.getOrDefault(emptyList())
         }
     }
 
