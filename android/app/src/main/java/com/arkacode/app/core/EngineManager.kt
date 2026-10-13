@@ -10,7 +10,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.zip.ZipInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
 /**
  * Unduh + jalankan binary `opencode` resmi di dalam proot Alpine (F0).
@@ -23,14 +24,23 @@ import java.util.zip.ZipInputStream
  */
 object EngineConfig {
     const val VERSION = "v1.19.0"
-    const val ASSET_ARM64 = "opencode-linux-arm64.zip"
-    const val ASSET_FALLBACK = "opencode-linux-aarch64.zip"
+    // Build musl = cocok untuk Alpine; fallback build gnu bila musl bermasalah.
+    const val ASSET_MUSL = "opencode-linux-arm64-musl.tar.gz"
+    const val ASSET_MUSL_SHA256 = "c864e28b1504fe4412d9495493e72b8ebf3e205dd1ee14d125b99c14b26623da"
+    const val ASSET_GNU = "opencode-linux-arm64.tar.gz"
+    const val ASSET_GNU_SHA256 = "e9841d43d3e1a8f36ed2691592d3b8b4fb097e606c8b559a277a1b845840e26b"
     const val DEFAULT_PORT = 4096
     const val DEFAULT_HOST = "127.0.0.1"
 
-    fun downloadUrls(): List<String> = listOf(ASSET_ARM64, ASSET_FALLBACK).map { asset ->
+    data class Asset(val name: String, val sha256: String)
+
+    fun assets(): List<Asset> = listOf(
+        Asset(ASSET_MUSL, ASSET_MUSL_SHA256),
+        Asset(ASSET_GNU, ASSET_GNU_SHA256),
+    )
+
+    fun downloadUrl(asset: String) =
         "https://github.com/anomalyco/opencode/releases/download/$VERSION/$asset"
-    }
 }
 
 sealed interface EngineState {
@@ -81,13 +91,17 @@ class EngineManager(private val context: Context) {
                 if (isDownloaded()) {
                     return@runCatching version() ?: "terpasang (distro belum siap untuk cek versi)"
                 }
-                val zipFile = File(engineDir, "opencode.zip")
+                val archive = File(engineDir, "opencode.tgz")
                 var downloaded = false
                 var lastError: Exception? = null
-                for (url in EngineConfig.downloadUrls()) {
+                for (asset in EngineConfig.assets()) {
                     try {
                         onProgress(0)
-                        download(url, zipFile, onProgress)
+                        download(EngineConfig.downloadUrl(asset.name), archive, onProgress)
+                        val actual = sha256Hex(archive)
+                        if (!actual.equals(asset.sha256, ignoreCase = true)) {
+                            throw IllegalStateException("Checksum ${asset.name} tidak cocok (rusak/terpotong?)")
+                        }
                         downloaded = true
                         break
                     } catch (e: Exception) {
@@ -96,8 +110,8 @@ class EngineManager(private val context: Context) {
                 }
                 if (!downloaded) throw lastError ?: IllegalStateException("Unduhan engine gagal")
                 onProgress(95)
-                extractBinary(zipFile)
-                zipFile.delete()
+                extractBinary(archive)
+                archive.delete()
                 onProgress(100)
                 version() ?: "terpasang (distro belum siap untuk cek versi)"
             }
@@ -129,23 +143,38 @@ class EngineManager(private val context: Context) {
         if (target.length() < 1_000_000) throw IllegalStateException("Berkas unduhan terlalu kecil, kemungkinan bukan zip valid")
     }
 
-    private fun extractBinary(zipFile: File) {
-        var found = false
-        ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zip ->
+    private fun sha256Hex(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(256 * 1024)
             while (true) {
-                val entry = zip.nextEntry ?: break
-                if (entry.isDirectory) continue
-                val name = entry.name.substringAfterLast('/')
-                if (name == "opencode") {
-                    val out = binaryFile()
-                    FileOutputStream(out).use { o -> zip.copyTo(o) }
-                    out.setExecutable(true, true)
-                    found = true
-                    break
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun extractBinary(tarGzFile: File) {
+        var found = false
+        GzipCompressorInputStream(BufferedInputStream(tarGzFile.inputStream())).use { gz ->
+            TarArchiveInputStream(gz).use { tar ->
+                while (true) {
+                    val entry = tar.nextEntry ?: break
+                    if (entry.isDirectory) continue
+                    val name = entry.name.substringAfterLast('/')
+                    if (name == "opencode") {
+                        val out = binaryFile()
+                        FileOutputStream(out).use { o -> tar.copyTo(o) }
+                        out.setExecutable(true, true)
+                        found = true
+                        break
+                    }
                 }
             }
         }
-        if (!found) throw IllegalStateException("ZIP tidak berisi binary opencode")
+        if (!found) throw IllegalStateException("Arsip tidak berisi binary opencode")
         if (!binaryFile().canExecute()) throw IllegalStateException("Binary tidak bisa di-exec")
     }
 
@@ -166,7 +195,7 @@ class EngineManager(private val context: Context) {
         runCatching {
             if (serverProcess?.isAlive == true) return@runCatching port
             val bin = binaryFile()
-            check(bin.isFile) { "Engine belum diunduh. Unduh dulu." }
+check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh ulang." }
             workDir.mkdirs()
             logFile().appendText("\n===== serve start port=$port =====\n")
 
