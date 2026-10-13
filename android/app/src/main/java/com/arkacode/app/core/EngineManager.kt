@@ -283,7 +283,7 @@ class EngineManager(private val context: Context) {
             workDir.mkdirs()
             logFile().appendText("\n===== serve start port=$port =====\n")
 
-            val argv = serveArgv(port, workDir)
+            val argv = serveArgv(port, workDir, password)
                 ?: throw IllegalStateException("Distro belum siap (pasang Alpine dulu).")
             val builder = ProcessBuilder(argv)
             builder.directory(context.filesDir)
@@ -362,7 +362,7 @@ class EngineManager(private val context: Context) {
      * argv proot untuk serve: cerminan DistroManager.buildProotCommand +
      * bind engine dir, eksekusi binary LANGSUNG (bukan sh -c) agar stop bersih.
      */
-    private fun serveArgv(port: Int, workDir: File): List<String>? {
+    private fun serveArgv(port: Int, workDir: File, password: String): List<String>? {
         val proot = distro.prootBinary() ?: return null
         val loader = distro.loaderBinary() ?: return null
         if (!distro.isInstalled()) return null
@@ -388,6 +388,7 @@ class EngineManager(private val context: Context) {
             "PROOT_LOADER=${loader.absolutePath}",
             "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
             "PROOT_NO_SECCOMP=1",
+            "OPENCODE_SERVER_PASSWORD=$password",
             "/opt/arkacode/opencode",
             "serve",
             "--port", port.toString(),
