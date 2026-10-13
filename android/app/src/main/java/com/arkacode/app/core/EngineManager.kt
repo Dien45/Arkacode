@@ -80,6 +80,27 @@ class EngineManager(private val context: Context) {
         }.getOrNull()
     }
 
+    /**
+     * Binary opencode butuh simbol C++ (libstdc++/libgcc) yang tidak ada di
+     * Alpine minirootfs polos — tanpa ini serve mati dengan "Error relocating".
+     * Diinstal sekali via apk; marker di dalam rootfs sehingga ikut terhapus
+     * (dan dipasang ulang) saat rootfs dipasang ulang.
+     */
+    suspend fun ensureGuestLibs(): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val marker = File(distro.rootfsDir, "root/.guestlibs-ok")
+            if (marker.isFile) return@runCatching
+            val out = runOneShot(
+                listOf("/sbin/apk", "add", "--no-cache", "libstdc++", "libgcc"),
+                180_000,
+            )
+            if (out.contains("ERROR", ignoreCase = true)) {
+                throw IllegalStateException("apk gagal: ${out.trim().take(500)}")
+            }
+            runCatching { marker.writeText("ok") }
+        }
+    }
+
     /** Eksekusi satu perintah LANGSUNG (tanpa sh) di proot dengan bind engine + workspace. */
     suspend fun runOneShot(tail: List<String>, timeoutMs: Long = 30_000): String =
         withContext(Dispatchers.IO) {
@@ -256,7 +277,8 @@ class EngineManager(private val context: Context) {
         runCatching {
             if (serverProcess?.isAlive == true) return@runCatching port
             val bin = binaryFile()
-check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh ulang." }
+            check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh ulang." }
+            ensureGuestLibs().getOrThrow()
             workDir.mkdirs()
             logFile().appendText("\n===== serve start port=$port =====\n")
 
