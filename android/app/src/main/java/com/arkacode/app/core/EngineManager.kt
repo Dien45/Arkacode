@@ -104,7 +104,7 @@ class EngineManager(private val context: Context) {
         }
 
     private fun download(url: String, target: File, onProgress: (Int) -> Unit) {
-        val conn = (URL(url) as HttpURLConnection).apply {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 60_000
             instanceFollowRedirects = true
