@@ -53,7 +53,6 @@ sealed interface EngineState {
 
 class EngineManager(private val context: Context) {
     private val distro = DistroManager(context)
-    private val execRunner = ExecRunner(context, distro)
 
     private val engineDir: File get() = File(context.filesDir, "engine").apply { mkdirs() }
     private val workspaceDir: File get() = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -69,16 +68,75 @@ class EngineManager(private val context: Context) {
         return bin.isFile && bin.canExecute()
     }
 
-    /** Cek `--version` lewat proot (butuh distro + engine terpasang). */
+    /**
+     * Cek `--version` lewat proot DENGAN bind engine (`/opt/arkacode`).
+     * Tanpa bind ini proot menjawab "not found" walau binary ada di host.
+     * Return null bila output tidak mirip nomor versi (mis. pesan error shell).
+     */
     suspend fun version(): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val res = execRunner.run(
-                "/opt/arkacode/opencode --version",
-                null,
-                ExecSettings(bindWorkspace = false, timeoutMs = 30_000),
-            )
-            (res.stdout + res.stderr).trim().takeIf { it.isNotEmpty() }
+            val out = runOneShot(listOf("/opt/arkacode/opencode", "--version")).trim()
+            out.takeIf { it.contains(Regex("\\d+\\.\\d+")) }?.take(100)
         }.getOrNull()
+    }
+
+    /** Eksekusi satu perintah LANGSUNG (tanpa sh) di proot dengan bind engine + workspace. */
+    suspend fun runOneShot(tail: List<String>, timeoutMs: Long = 30_000): String =
+        withContext(Dispatchers.IO) {
+            val argv = baseArgv() ?: throw IllegalStateException("Distro belum siap")
+            val builder = ProcessBuilder(argv + guestEnvTail() + tail)
+            builder.directory(context.filesDir)
+            builder.environment().apply {
+                putAll(distro.prootProcessEnv())
+                this["PATH"] = "/system/bin:/system/xbin:/vendor/bin"
+                this["HOME"] = context.filesDir.absolutePath
+                this["TMPDIR"] = context.cacheDir.absolutePath
+            }
+            builder.redirectErrorStream(true)
+            val proc = builder.start()
+            try {
+                if (!proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    throw IllegalStateException("timeout")
+                }
+                proc.inputStream.readBytes().toString(Charsets.UTF_8).take(64 * 1024)
+            } finally {
+                runCatching { proc.destroyForcibly() }
+            }
+        }
+
+    private fun baseArgv(): MutableList<String>? {
+        val proot = distro.prootBinary() ?: return null
+        val loader = distro.loaderBinary() ?: return null
+        if (!distro.isInstalled()) return null
+        val pw = workspaceDir
+        return mutableListOf(
+            proot.absolutePath,
+            "--kill-on-exit",
+            "-0",
+            "-r", distro.rootfsDir.absolutePath,
+            "-w", "/root/workspace",
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "/sys",
+            "-b", distro.rootfsDir.absolutePath + "/tmp:/dev/shm",
+            "-b", "${pw.absolutePath}:/root/workspace",
+            "-b", "${engineDir.absolutePath}:/opt/arkacode",
+        )
+    }
+
+    private fun guestEnvTail(): List<String> {
+        val loader = checkNotNull(distro.loaderBinary()) { "loader proot hilang" }
+        return listOf(
+            "/usr/bin/env",
+            "-i",
+            "HOME=/root",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "LANG=C.UTF-8",
+            "PROOT_LOADER=${loader.absolutePath}",
+            "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
+            "PROOT_NO_SECCOMP=1",
+        )
     }
 
     /**
