@@ -89,15 +89,16 @@ class EngineManager(private val context: Context) {
     suspend fun ensureGuestLibs(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val marker = File(distro.rootfsDir, "root/.guestlibs-ok")
-            if (marker.isFile) return@runCatching
-            val out = runOneShot(
-                listOf("/sbin/apk", "add", "--no-cache", "libstdc++", "libgcc"),
-                180_000,
-            )
-            if (out.contains("ERROR", ignoreCase = true)) {
-                throw IllegalStateException("apk gagal: ${out.trim().take(500)}")
+            if (!marker.isFile) {
+                val out = runOneShot(
+                    listOf("/sbin/apk", "add", "--no-cache", "libstdc++", "libgcc"),
+                    180_000,
+                )
+                if (out.contains("ERROR", ignoreCase = true)) {
+                    throw IllegalStateException("apk gagal: ${out.trim().take(500)}")
+                }
+                runCatching { marker.writeText("ok") }
             }
-            runCatching { marker.writeText("ok") }
         }
     }
 
