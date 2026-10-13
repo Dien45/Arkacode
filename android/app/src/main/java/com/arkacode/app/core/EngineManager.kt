@@ -151,10 +151,12 @@ class EngineManager(private val context: Context) {
                 }
                 val archive = File(engineDir, "opencode.tgz")
                 var downloaded = false
+                var lastAsset: String? = null
                 var lastError: Exception? = null
                 for (asset in EngineConfig.assets()) {
                     try {
                         onProgress(0)
+                        lastAsset = asset.name
                         download(EngineConfig.downloadUrl(asset.name), archive, onProgress)
                         val actual = sha256Hex(archive)
                         if (!actual.equals(asset.sha256, ignoreCase = true)) {
@@ -169,6 +171,7 @@ class EngineManager(private val context: Context) {
                 if (!downloaded) throw lastError ?: IllegalStateException("Unduhan engine gagal")
                 onProgress(95)
                 extractBinary(archive)
+                runCatching { File(engineDir, "asset.txt").writeText(lastAsset ?: "?") }
                 archive.delete()
                 onProgress(100)
                 version() ?: "terpasang (distro belum siap untuk cek versi)"
@@ -279,7 +282,11 @@ check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh u
             while (System.currentTimeMillis() < deadline) {
                 if (proc.isAlive.not()) {
                     serverProcess = null
-                    throw IllegalStateException("Proses serve mati saat startup. Cek serve.log.")
+                    val tail = tailLog(15).take(1200)
+                    throw IllegalStateException(
+                        "Proses serve mati saat startup." +
+                            if (tail.isBlank()) " (serve.log kosong)" else "\n--- serve.log ---\n$tail",
+                    )
                 }
                 try {
                     val h = client.health()
@@ -304,6 +311,22 @@ check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh u
         serverProcess = null
         runCatching { logFile().appendText("===== serve stop =====\n") }
     }
+
+    /**
+     * Uji eksekusi proot terisolasi (tanpa opencode): echo + arsitektur +
+     * ukuran page kernel + isi /opt/arkacode. Untuk membedakan "proot tidak
+     * bisa exec apa pun" vs "khusus binary opencode yang gagal".
+     */
+    suspend fun execSelfTest(): String = withContext(Dispatchers.IO) {
+        val abi = android.os.Build.SUPPORTED_ABIS.joinToString(",")
+        val echo = runCatching { runOneShot(listOf("/bin/echo", "PROOT_OK")) }.getOrElse { "echo GAGAL: ${it.message}" }
+        val pagesize = runCatching { runOneShot(listOf("/bin/sh", "-c", "getconf PAGESIZE 2>/dev/null || echo unknown")) }.getOrElse { "?" }
+        val bind = runCatching { runOneShot(listOf("/bin/ls", "-la", "/opt/arkacode")) }.getOrElse { "ls GAGAL: ${it.message}" }
+        "ABI: $abi\n" + "echo: ${echo.trim()}\n" + "PAGESIZE: ${pagesize.trim()}\n" + "ls /opt/arkacode:\n${bind.trim().take(800)}"
+    }
+
+    fun downloadedAsset(): String? =
+        File(engineDir, "asset.txt").takeIf { it.isFile }?.let { runCatching { it.readText().trim() }.getOrNull() }
 
     fun isRunning(): Boolean = serverProcess?.isAlive == true
 

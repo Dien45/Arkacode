@@ -58,6 +58,8 @@ fun EngineScreen() {
     var distroPct by remember { mutableIntStateOf(-1) }
     var logTail by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var diagOut by remember { mutableStateOf<String?>(null) }
+    var assetInfo by remember { mutableStateOf("") }
     var portText by remember { mutableStateOf(EngineConfig.DEFAULT_PORT.toString()) }
     var password by remember { mutableStateOf("arkacode-local") }
 
@@ -72,6 +74,7 @@ fun EngineScreen() {
                 "belum diunduh"
             }
             serverInfo = if (engine.isRunning()) "jalan (port $portText)" else "berhenti"
+            assetInfo = withContext(Dispatchers.IO) { engine.downloadedAsset() ?: "-" }
             logTail = withContext(Dispatchers.IO) { engine.tailLog() }
         }
     }
@@ -107,6 +110,7 @@ fun EngineScreen() {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Distro: $distroInfo", style = MaterialTheme.typography.bodyMedium)
                 Text("Engine: $engineInfo", style = MaterialTheme.typography.bodyMedium)
+                Text("Asset: $assetInfo", style = MaterialTheme.typography.bodyMedium)
                 Text("Server: $serverInfo", style = MaterialTheme.typography.bodyMedium)
                 error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
             }
@@ -162,6 +166,16 @@ fun EngineScreen() {
             modifier = Modifier.fillMaxWidth(),
         ) { Text("2. Download engine opencode") }
 
+        OutlinedButton(
+            onClick = {
+                runJob {
+                    diagOut = withContext(Dispatchers.IO) { engine.execSelfTest() }
+                }
+            },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Tes exec proot (echo/abi/pagesize/ls)") }
+
         Button(
             onClick = {
                 runJob {
@@ -198,6 +212,17 @@ fun EngineScreen() {
             ) { Text("Refresh") }
         }
 
+        diagOut?.let {
+            Text("Hasil tes exec:", style = MaterialTheme.typography.labelMedium)
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Text(
+                    it.ifBlank { "(kosong)" },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(10.dp),
+                )
+            }
+        }
         Text("serve.log:", style = MaterialTheme.typography.labelMedium)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
             Text(
