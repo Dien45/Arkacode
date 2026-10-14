@@ -98,7 +98,7 @@ Pola kerja tiap fase (warisan Arka): patch kecil → PR → CI build APK → mer
 | Baterai/thermal untuk turn panjang | Terbuka | `prompt_async` + notifikasi; stop selalu tersedia |
 | Secret (password server, auth.json) | Terkontrol | EncryptedSharedPreferences; tidak pernah di-log |
 
-## 8. Status implementasi (di `main`, per 2026-10-14; +layar Providers)
+## 8. Status implementasi (di `main`, per 2026-10-14; +Providers/Kapabilitas)
 
 Sudah:
 - F0: skeleton Gradle+CI, proot Alpine, ServerManager (unduh v1.19.0 musl+sha256, `serve` + tunggu health, stop, serve.log), OpenCodeClient (basic-auth, health, GET mentah).
@@ -108,13 +108,17 @@ Sudah:
 - Fondasi: backup rules terpasang di manifest, CI debug + release hijau, password server terenkripsi (+editor port/password).
 - Event server (SSE) sebagai trigger refresh live; polling tetap jaring pengaman.
 - Layar Penyedia AI: daftar provider + model (badge Gratis), isi/hapus API key per provider (terenkripsi, disuntik sebagai env saat serve nyala).
+- Files UI: tree/baca/cari + preview (markdown/gambar) via `/api/fs/*`.
+- Navbar bawah (Sesi | AI | Kapabilitas); header aman status-bar; tema claymorphism terang/gelap persisten.
+- Layar Kapabilitas: daftar agent (`GET /api/agent`), perintah (`GET /api/command`), skill (`GET /api/skill`).
+- Chat F3: pemilih agent per sesi (`POST /api/session/:id/agent`), palet perintah (sisip `/nama`), ringkas (`POST .../compact`), revert+dif berkas (`POST .../revert/stage|commit|clear`, menampilkan patch per file).
 
 Belum:
 - SSE penuh dengan parsing semantik event (kini trigger mentah saja).
-- OAuth login Zen + config editor (kunci API manual sudah).
-- Files UI (tree/baca/cari) — baru API mentah.
-- Agents/commands/MCP UI; diff/revert/share/summarize/compact/fork UI.
-- i18n; tema terang/gelap sudah.
+- OAuth login Zen end-to-end via `/api/integration/:id/connect/oauth` (kunci API manual sudah jalan).
+- i18n (ID/EN) di UI.
+- Config editor (bilah berkas opencode.json) — tanpa endpoint tulis fs di v1.19.
+- MCP / share / fork / summarize: server v1.19 tidak menyediakan endpoint-nya (bukan keterbatasan app).
 
 ## 7. Pertanyaan Terbuka (tidak menghalangi F0)
 
