@@ -26,6 +26,33 @@ sealed interface ChatItem {
 }
 
 data class ModelInfo(val id: String, val name: String, val providerID: String, val free: Boolean = false)
+
+/** Agent opencode (mode primary/subagent/all). */
+data class AgentInfo(
+    val id: String,
+    val description: String,
+    val mode: String,
+    val color: String?,
+    val hidden: Boolean,
+)
+
+/** Perintah (slash command) yang terdaftar di server. */
+data class CommandInfo(val name: String, val description: String, val agent: String?)
+
+/** Skill opencode (folder/URL/embedded). */
+data class SkillInfo(val name: String, val description: String, val location: String, val slash: Boolean)
+
+/** Satu berkas dalam rencana revert. */
+data class FileDiffEntry(
+    val path: String,
+    val status: String,
+    val additions: Int,
+    val deletions: Int,
+    val patch: String,
+)
+
+/** Status revert yang distage server. */
+data class RevertState(val messageID: String, val files: List<FileDiffEntry>)
 data class ProviderInfo(val id: String, val name: String, val models: List<ModelInfo>)
 data class ModelRef(val providerID: String, val id: String)
 

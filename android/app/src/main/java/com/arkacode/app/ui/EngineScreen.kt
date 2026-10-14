@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
@@ -96,6 +97,7 @@ fun EngineScreen(
     var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
     var chatTarget by remember { mutableStateOf<ChatSession?>(null) }
     var showProviders by remember { mutableStateOf(false) }
+    var showCaps by remember { mutableStateOf(false) }
     var lines by remember { mutableStateOf(listOf<String>()) }
     var failMsg by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
@@ -181,7 +183,13 @@ fun EngineScreen(
         }
         is Screen.Ready -> {
             val target = chatTarget
-            if (showProviders) {
+            if (showCaps) {
+                CapabilitiesScreen(
+                    port = port,
+                    password = password,
+                    onBack = { showCaps = false },
+                )
+            } else if (showProviders) {
                 ProvidersScreen(
                     port = port,
                     password = password,
@@ -214,6 +222,7 @@ fun EngineScreen(
                     onOpenChat = { chatTarget = it },
                     onNewSession = { chatTarget = it },
                     onOpenProviders = { showProviders = true },
+                    onOpenCapabilities = { showCaps = true },
                 )
             }
         }
@@ -330,6 +339,7 @@ private fun ReadyScreen(
     onOpenChat: (ChatSession) -> Unit,
     onNewSession: (ChatSession) -> Unit,
     onOpenProviders: () -> Unit,
+    onOpenCapabilities: () -> Unit,
     isDark: Boolean,
     onToggleTheme: () -> Unit,
 ) {
@@ -451,6 +461,12 @@ private fun ReadyScreen(
                 onClick = onOpenProviders,
                 icon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
                 label = { Text("AI") },
+            )
+            NavigationBarItem(
+                selected = false,
+                onClick = onOpenCapabilities,
+                icon = { Icon(Icons.Default.Build, contentDescription = null) },
+                label = { Text("Kapabilitas") },
             )
         }
     }

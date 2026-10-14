@@ -407,4 +407,102 @@ class OpenCodeClient(
             ProviderInfo(id, o.str("name") ?: id, emptyList())
         }
     }
+
+    // ------------------------------------------------------- agents/commands/skills
+
+    /** Agent yang terdaftar (untuk pemilih agent per sesi). */
+    suspend fun listAgents(): List<AgentInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/agent")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() }
+            ?: (el as? JsonArray) ?: return@withContext emptyList()
+        arr.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id") ?: return@mapNotNull null
+            AgentInfo(
+                id = id,
+                description = o.str("description") ?: "",
+                mode = o.str("mode") ?: "all",
+                color = o.str("color"),
+                hidden = (o["hidden"] as? JsonPrimitive)?.booleanOrNull == true,
+            )
+        }
+    }
+
+    /** Ganti agent sesi (berlaku untuk turn berikutnya). */
+    suspend fun switchAgent(sessionId: String, agentId: String) {
+        val body = buildJsonObject { put("agent", agentId) }
+        call(postReq("/api/session/$sessionId/agent", body.toString()))
+    }
+
+    /** Perintah (slash command) yang terdaftar. */
+    suspend fun listCommands(): List<CommandInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/command")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() }
+            ?: (el as? JsonArray) ?: return@withContext emptyList()
+        arr.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val name = o.str("name") ?: return@mapNotNull null
+            CommandInfo(name, o.str("description") ?: "", o.str("agent"))
+        }
+    }
+
+    /** Skill yang terdaftar di server. */
+    suspend fun listSkills(): List<SkillInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/skill")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() }
+            ?: (el as? JsonArray) ?: return@withContext emptyList()
+        arr.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val name = o.str("name") ?: return@mapNotNull null
+            SkillInfo(
+                name = name,
+                description = o.str("description") ?: "",
+                location = o.str("location") ?: "",
+                slash = (o["slash"] as? JsonPrimitive)?.booleanOrNull == true,
+            )
+        }
+    }
+
+    // ------------------------------------------------------- compact/revert
+
+    /** Ringkas konteks percakapan (server-side compaction). */
+    suspend fun compactSession(sessionId: String) {
+        call(postReq("/api/session/$sessionId/compact", null))
+    }
+
+    /** Stage revert ke sebuah pesan; mengembalikan berkas yang berubah. */
+    suspend fun stageRevert(sessionId: String, messageId: String, files: Boolean = true): RevertState =
+        withContext(Dispatchers.IO) {
+            val body = buildJsonObject {
+                put("messageID", messageId)
+                put("files", files)
+            }
+            val el = call(postReq("/api/session/$sessionId/revert/stage", body.toString()))
+            val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
+            val diffs = o.arr("files").mapNotNull { item ->
+                val d = item as? JsonObject ?: return@mapNotNull null
+                val path = d.str("path") ?: return@mapNotNull null
+                FileDiffEntry(
+                    path = path,
+                    status = d.str("status") ?: "",
+                    additions = (d["additions"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                    deletions = (d["deletions"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                    patch = d.str("patch") ?: "",
+                )
+            }
+            RevertState(o.str("messageID") ?: messageId, diffs)
+        }
+
+    /** Buang revert yang distage (tidak mengubah berkas). */
+    suspend fun clearRevert(sessionId: String) {
+        call(postReq("/api/session/$sessionId/revert/clear", null))
+    }
+
+    /** Terapkan revert yang distage (kembalikan berkas ke snapshot). */
+    suspend fun commitRevert(sessionId: String) {
+        call(postReq("/api/session/$sessionId/revert/commit", null))
+    }
 }

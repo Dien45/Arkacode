@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,15 +24,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -57,18 +62,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.net.AgentInfo
 import com.arkacode.app.net.ChatItem
+import com.arkacode.app.net.CommandInfo
 import com.arkacode.app.net.ModelRef
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
+import com.arkacode.app.net.RevertState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Layar chat F1: pesan dari server (poll 2 dtk saat sibuk), kirim async,
- * abort, approval persetujuan, salin pesan, picker model per sesi.
+ * Layar chat F1+: pesan dari server (poll 2 dtk saat sibuk), kirim async,
+ * abort, approval persetujuan, salin pesan, picker model per sesi, pemilih
+ * agent, perintah (slash), ringkas (compact), dan revert/diff berkas.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +105,13 @@ fun ChatScreen(
     var pollJob by remember { mutableStateOf<Job?>(null) }
     var waitJob by remember { mutableStateOf<Job?>(null) }
     var showFilesTab by remember { mutableStateOf(false) }
+    var agents by remember { mutableStateOf(listOf<AgentInfo>()) }
+    var agentId by remember { mutableStateOf<String?>(null) }
+    var commands by remember { mutableStateOf(listOf<CommandInfo>()) }
+    var showAgents by remember { mutableStateOf(false) }
+    var showCommands by remember { mutableStateOf(false) }
+    var revert by remember { mutableStateOf<RevertState?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     suspend fun refreshAll() {
         messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
@@ -154,12 +170,21 @@ fun ChatScreen(
         }
     }
 
+    fun openRevert(messageId: String) {
+        scope.launch {
+            revert = runCatching { client.stageRevert(sessionId, messageId) }.getOrNull()
+                ?: RevertState(messageId, emptyList())
+        }
+    }
+
     LaunchedEffect(sessionId) {
         refreshAll()
         val pin = if (initialProviderID != null && initialModelID != null) {
             ModelRef(initialProviderID, initialModelID)
         } else null
         pinnedModel = pin
+        runCatching { client.listAgents() }.getOrNull()?.let { agents = it.filter { a -> !a.hidden } }
+        runCatching { client.listCommands() }.getOrNull()?.let { commands = it }
     }
     LaunchedEffect(messages.size) {
         val count = listState.layoutInfo.totalItemsCount
@@ -182,25 +207,46 @@ fun ChatScreen(
         }
     }
 
+    val lastUser = messages.filterIsInstance<ChatItem.User>().lastOrNull()
+
     Scaffold(
         topBar = {
             ChatBar(
                 title = sessionTitle.ifBlank { "Sesi" },
                 modelLabel = pinnedModel?.let { "${it.providerID}/${it.id}" } ?: "Model server",
+                agentLabel = agentId ?: "agent",
                 busy = busy,
+                menuOpen = menuOpen,
+                canRevert = lastUser != null,
                 onBack = onBack,
                 onOpenPicker = { showPicker = true },
                 onStop = { stopAll() },
+                onToggleMenu = { menuOpen = !menuOpen },
+                onOpenAgents = { menuOpen = false; showAgents = true },
+                onOpenCommands = { menuOpen = false; showCommands = true },
+                onCompact = {
+                    menuOpen = false
+                    scope.launch {
+                        error = null
+                        runCatching { client.compactSession(sessionId) }
+                            .onFailure { error = it.message ?: "gagal ringkas" }
+                        refreshAll()
+                    }
+                },
+                onRevert = {
+                    menuOpen = false
+                    lastUser?.let { openRevert(it.id) }
+                },
             )
         },
         bottomBar = {
             if (!showFilesTab) {
                 ChatInput(
-                input = input,
-                onInputChange = { input = it },
-                busy = busy,
-                onSend = { send(input) },
-                onStop = { stopAll() },
+                    input = input,
+                    onInputChange = { input = it },
+                    busy = busy,
+                    onSend = { send(input) },
+                    onStop = { stopAll() },
                 )
             }
         },
@@ -262,7 +308,7 @@ fun ChatScreen(
                     }
                 }) { item ->
                     when (item) {
-                        is ChatItem.User -> UserBubble(item)
+                        is ChatItem.User -> UserBubble(item, onRevert = { openRevert(item.id) })
                         is ChatItem.Assistant -> AssistantBubble(item)
                         is ChatItem.Note -> NoteRow(item)
                     }
@@ -306,16 +352,69 @@ fun ChatScreen(
             onDismiss = { showPicker = false },
         )
     }
+
+    if (showAgents) {
+        AgentSheet(
+            agents = agents,
+            current = agentId,
+            onSelect = { id ->
+                agentId = id
+                scope.launch { runCatching { client.switchAgent(sessionId, id) } }
+                showAgents = false
+            },
+            onDismiss = { showAgents = false },
+        )
+    }
+
+    if (showCommands) {
+        CommandSheet(
+            commands = commands,
+            onPick = { name ->
+                input = "/$name "
+                showCommands = false
+            },
+            onDismiss = { showCommands = false },
+        )
+    }
+
+    revert?.let { state ->
+        RevertSheet(
+            state = state,
+            onApply = {
+                scope.launch {
+                    runCatching { client.commitRevert(sessionId) }
+                        .onFailure { error = it.message ?: "gagal revert" }
+                    revert = null
+                    refreshAll()
+                }
+            },
+            onCancel = {
+                scope.launch {
+                    runCatching { client.clearRevert(sessionId) }
+                    revert = null
+                }
+            },
+            onDismiss = { revert = null },
+        )
+    }
 }
 
 @Composable
 private fun ChatBar(
     title: String,
     modelLabel: String,
+    agentLabel: String,
     busy: Boolean,
+    menuOpen: Boolean,
+    canRevert: Boolean,
     onBack: () -> Unit,
     onOpenPicker: () -> Unit,
     onStop: () -> Unit,
+    onToggleMenu: () -> Unit,
+    onOpenAgents: () -> Unit,
+    onOpenCommands: () -> Unit,
+    onCompact: () -> Unit,
+    onRevert: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
@@ -330,17 +429,41 @@ private fun ChatBar(
             }
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                TextButton(onClick = onOpenPicker) {
-                    Text(
-                        modelLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onOpenPicker) {
+                        Text(
+                            modelLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
+                    TextButton(onClick = onOpenAgents) {
+                        Text(
+                            agentLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             if (busy) {
                 IconButton(onClick = onStop) {
                     Icon(Icons.Default.Stop, contentDescription = "Stop")
+                }
+            }
+            Box {
+                IconButton(onClick = onToggleMenu) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = onToggleMenu) {
+                    DropdownMenuItem(text = { Text("Agent…") }, onClick = onOpenAgents)
+                    DropdownMenuItem(text = { Text("Perintah…") }, onClick = onOpenCommands)
+                    DropdownMenuItem(text = { Text("Ringkas percakapan") }, onClick = onCompact)
+                    DropdownMenuItem(
+                        text = { Text("Revert ke pesan terakhir") },
+                        onClick = onRevert,
+                        enabled = canRevert,
+                    )
                 }
             }
         }
@@ -385,7 +508,7 @@ private fun ChatInput(
 }
 
 @Composable
-private fun UserBubble(item: ChatItem.User) {
+private fun UserBubble(item: ChatItem.User, onRevert: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
@@ -399,6 +522,9 @@ private fun UserBubble(item: ChatItem.User) {
                         "${item.fileCount} lampiran",
                         style = MaterialTheme.typography.labelSmall,
                     )
+                }
+                TextButton(onClick = onRevert) {
+                    Text("Revert ke sini", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -540,6 +666,201 @@ private fun ApprovalSheet(
                             TextButton(onClick = { onReply(req, "always") }) { Text("Selalu") }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AgentSheet(
+    agents: List<AgentInfo>,
+    current: String?,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "Agent",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (agents.isEmpty()) {
+                Text("Tidak ada agent.", style = MaterialTheme.typography.bodyMedium)
+            }
+            agents.forEach { a ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(a.id, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                a.description.ifBlank { "mode: ${a.mode}" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (a.id == current) {
+                            Text("aktif", style = MaterialTheme.typography.labelSmall)
+                        } else {
+                            TextButton(onClick = { onSelect(a.id) }) { Text("Pilih") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommandSheet(
+    commands: List<CommandInfo>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "Perintah",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (commands.isEmpty()) {
+                Text("Tidak ada perintah.", style = MaterialTheme.typography.bodyMedium)
+            }
+            commands.forEach { c ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("/" + c.name, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                            if (c.description.isNotBlank()) {
+                                Text(
+                                    c.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        TextButton(onClick = { onPick(c.name) }) { Text("Pakai") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RevertSheet(
+    state: RevertState,
+    onApply: () -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Revert ke pesan ${state.messageID.take(8)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (state.files.isEmpty()) {
+                Text(
+                    "Tidak ada berkas yang berubah pada langkah ini.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Text(
+                    "${state.files.size} berkas akan dikembalikan:",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.files.forEach { f ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    f.path,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    "${f.status} +${f.additions} -${f.deletions}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                            if (f.patch.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    f.patch.take(4000),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Batalkan") }
+                TextButton(onClick = onApply, modifier = Modifier.weight(1f)) {
+                    Text("Terapkan revert", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
