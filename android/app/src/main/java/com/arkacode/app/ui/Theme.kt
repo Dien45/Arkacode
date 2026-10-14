@@ -2,6 +2,7 @@ package com.arkacode.app.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -12,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
 /**
@@ -90,18 +92,34 @@ fun ArkacodeTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
     )
 }
 
-/** Kartu clay: sudut 20dp + bayangan lembut biru (terang) / dalam (gelap). */
+/** Bentuk clay standar: sudut besar. */
+val ClayShape: Shape = RoundedCornerShape(20.dp)
+
+/** Bentuk clay kecil (badge/pill). */
+val ClayShapeSmall: Shape = RoundedCornerShape(12.dp)
+
+/**
+ * Kartu clay seragam: sudut besar + bayangan lembut bertinta primary
+ * (terang) / dalam (gelap). Pakai [contentPadding] = PaddingValues(0.dp)
+ * bila isi kartu sudah punya padding sendiri.
+ */
 @Composable
-fun ClayCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun ClayCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = ClayShape,
+    contentPadding: PaddingValues = PaddingValues(14.dp),
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Surface(
         modifier = modifier.shadow(
             elevation = 10.dp,
-            shape = RoundedCornerShape(20.dp),
+            shape = shape,
             ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
             spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
         ),
-        shape = RoundedCornerShape(20.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        content = { Column(Modifier.padding(14.dp), content = content) },
-    )
+    ) {
+        Column(Modifier.padding(contentPadding), content = content)
+    }
 }
