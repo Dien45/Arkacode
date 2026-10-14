@@ -25,7 +25,7 @@ sealed interface ChatItem {
     data class Note(val id: String, val text: String) : ChatItem
 }
 
-data class ModelInfo(val id: String, val name: String)
+data class ModelInfo(val id: String, val name: String, val providerID: String, val free: Boolean = false)
 data class ProviderInfo(val id: String, val name: String, val models: List<ModelInfo>)
 data class ModelRef(val providerID: String, val id: String)
 

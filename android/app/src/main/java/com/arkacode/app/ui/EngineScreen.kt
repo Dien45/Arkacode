@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -62,7 +65,10 @@ private sealed interface Screen {
  * sudah jalan, frontend ditampilkan.
  */
 @Composable
-fun EngineScreen() {
+fun EngineScreen(
+    darkTheme: Boolean,
+    onToggleTheme: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember { EngineManager(context) }
@@ -170,6 +176,8 @@ fun EngineScreen() {
                     version = s.version,
                     port = port,
                     engine = engine,
+                    isDark = darkTheme,
+                    onToggleTheme = onToggleTheme,
 
                     onStop = {
                         engine.stopServer()
@@ -271,7 +279,8 @@ private fun ReadyScreen(
     onStop: () -> Unit,
     onOpenChat: (ChatSession) -> Unit,
     onNewSession: (ChatSession) -> Unit,
-) {
+    isDark: Boolean,
+    onToggleTheme: () -> Unit,
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uiPrefs = remember { com.arkacode.app.core.SessionUiPrefs(context) }
@@ -306,7 +315,13 @@ private fun ReadyScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Column(Modifier.weight(1f)) {
                 Text("Arkacode", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
@@ -314,6 +329,7 @@ private fun ReadyScreen(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            TextButton(onClick = onToggleTheme) { Text(if (isDark) "\u2600\uFE0F" else "\uD83C\uDF19") }
             OutlinedButton(onClick = onStop) { Text("Stop") }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -349,11 +365,9 @@ private fun ReadyScreen(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 list.take(50).forEach { s ->
                     val shown = s.copy(title = titles[s.id] ?: s.title)
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ClayCard(
                         modifier = Modifier.clickable { onOpenChat(shown) },
                     ) {
-                        Column(Modifier.padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(shown.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
@@ -367,7 +381,6 @@ private fun ReadyScreen(
                                     Text("Hapus", color = MaterialTheme.colorScheme.error)
                                 }
                             }
-                        }
                     }
                 }
             }
@@ -429,4 +442,3 @@ private fun ReadyScreen(
             },
         )
     }
-}

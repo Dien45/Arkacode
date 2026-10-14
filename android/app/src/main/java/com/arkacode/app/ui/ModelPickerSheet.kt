@@ -4,8 +4,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -29,12 +31,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.net.ModelInfo
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.ProviderInfo
 import kotlinx.coroutines.launch
 
 /**
- * Bottom sheet pilih model per sesi (F1): daftar provider → model.
+ * Bottom sheet pilih model per sesi: model diambil flat dari server
+ * (`GET /api/model`) lalu dikelompokkan per provider. Badge "Gratis"
+ * untuk model bercost nol (mis. sebagian model Zen).
  * Centang = pin sesi aktif; tap langsung switch model sesi di server.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,13 +53,19 @@ fun ModelPickerContent(
 ) {
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<List<ProviderInfo>?>(null) }
+    var models by remember { mutableStateOf<List<ModelInfo>?>(null) }
     var query by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(Unit) {
         scope.launch {
             providers = runCatching { client.listProviders() }.getOrNull() ?: emptyList()
+            models = runCatching { client.listModels() }.getOrNull() ?: emptyList()
         }
+    }
+
+    val names = remember(providers) {
+        (providers ?: emptyList()).associate { it.id to it.name }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -73,75 +84,80 @@ fun ModelPickerContent(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            val list = providers
-            if (list == null) {
+            val all = models
+            if (all == null) {
                 Text("memuat…", style = MaterialTheme.typography.bodyMedium)
-            } else if (list.isEmpty()) {
+            } else if (all.isEmpty()) {
                 Text(
-                    "Tidak ada provider. Atur penyedia di server dulu.",
+                    "Tidak ada model dari server. Pastikan penyedia sudah dikonfigurasi (butuh login/API key di server opencode).",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
+                val filtered = remember(all, query) {
+                    if (query.isBlank()) all
+                    else all.filter {
+                        it.id.contains(query, ignoreCase = true) ||
+                            it.name.contains(query, ignoreCase = true) ||
+                            it.providerID.contains(query, ignoreCase = true)
+                    }
+                }
+                val grouped = remember(filtered) { filtered.groupBy { it.providerID } }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(list, key = { it.id }) { provider ->
-                        val matches = remember(provider, query) {
-                            if (query.isBlank()) provider.models
-                            else provider.models.filter {
-                                it.id.contains(query, ignoreCase = true) ||
-                                    it.name.contains(query, ignoreCase = true)
+                    grouped.toList().sortedBy { it.first }.forEach { (pid, ms) ->
+                        item(key = "head_$pid") {
+                            val label = names[pid] ?: pid
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        expanded = if (pid in expanded) expanded - pid else expanded + pid
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text("${ms.size} model", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ),
-                        ) {
-                            Column(Modifier.padding(10.dp)) {
+                        if (pid in expanded) {
+                            items(ms.take(200), key = { pid + "_" + it.id }) { model ->
+                                val selected = pid == currentProviderID && model.id == currentModelID
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            expanded = if (provider.id in expanded) {
-                                                expanded - provider.id
-                                            } else {
-                                                expanded + provider.id
-                                            }
-                                        },
+                                        .clickable { onSelect(pid, model.id) }
+                                        .padding(vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        provider.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Text(
-                                        "${matches.size} model",
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                }
-                                if (provider.id in expanded) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        matches.take(100).forEach { model ->
-                                            val selected = provider.id == currentProviderID &&
-                                                model.id == currentModelID
-                                            Row(
-                                                Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { onSelect(provider.id, model.id) }
-                                                    .padding(vertical = 6.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(
-                                                    model.name,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    modifier = Modifier.weight(1f),
-                                                )
-                                                if (selected) {
-                                                    Icon(Icons.Default.Check, contentDescription = "Aktif")
-                                                }
-                                            }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(model.name, style = MaterialTheme.typography.bodySmall)
+                                        Text(
+                                            model.id,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (model.free) {
+                                        Card(
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                            ),
+                                        ) {
+                                            Text(
+                                                "Gratis",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            )
                                         }
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+                                    if (selected) {
+                                        Icon(Icons.Default.Check, contentDescription = "Aktif")
                                     }
                                 }
                             }
