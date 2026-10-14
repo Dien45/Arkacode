@@ -126,6 +126,61 @@ class OpenCodeClient(
         )
     }
 
+    private fun encodeRelPath(path: String): String =
+        path.split("/").filter { it.isNotEmpty() }
+            .joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8") }
+
+    /** Daftar isi satu direktori ("" = root working dir server). */
+    suspend fun listFiles(path: String = ""): List<FsEntry> = withContext(Dispatchers.IO) {
+        val q = if (path.isBlank()) "" else "?path=" + encodeRelPath(path)
+        val el = call(getReq("/api/fs/list$q"))
+        val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
+        data.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val rel = o.str("path") ?: return@mapNotNull null
+            FsEntry(rel, o.str("type") == "directory")
+        }
+    }
+
+    /** Baca file (teks, dipotong maxChars). */
+    suspend fun readFile(path: String, maxChars: Int = 100_000): String = withContext(Dispatchers.IO) {
+        val bytes = callBytes(getReq("/api/fs/read/" + encodeRelPath(path)))
+        String(bytes, Charsets.UTF_8).take(maxChars)
+    }
+
+    /** Cari file/direktori rekursif. */
+    suspend fun findFiles(query: String, limit: Int = 50): List<FsEntry> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        val el = call(getReq("/api/fs/find?query=" + java.net.URLEncoder.encode(query, "UTF-8") + "&limit=$limit"))
+        val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
+        data.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val rel = o.str("path") ?: return@mapNotNull null
+            FsEntry(rel, o.str("type") == "directory")
+        }
+    }
+
+    private suspend fun callBytes(req: Request): ByteArray = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(req)
+        cont.invokeOnCancellation { runCatching { call.cancel() } }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use { resp ->
+                    if (!cont.isActive) return
+                    if (!resp.isSuccessful) {
+                        cont.resumeWithException(IllegalStateException("HTTP ${resp.code}"))
+                        return
+                    }
+                    cont.resume(resp.body?.bytes() ?: ByteArray(0)) {}
+                }
+            }
+        })
+    }
+
     /** GET mentah untuk debug. */
     suspend fun get(path: String): String = withContext(Dispatchers.IO) {
         val el = call(getReq(path))

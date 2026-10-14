@@ -31,3 +31,6 @@ data class ModelRef(val providerID: String, val id: String)
 
 /** Permintaan persetujuan (ringkasan best-effort dari field mentahnya). */
 data class PermissionReq(val id: String, val summary: String)
+
+/** Entri filesystem server (path relatif ke working dir). */
+data class FsEntry(val path: String, val isDir: Boolean)
