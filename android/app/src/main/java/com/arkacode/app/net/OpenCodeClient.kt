@@ -1,7 +1,7 @@
 package com.arkacode.app.net
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitClose
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn

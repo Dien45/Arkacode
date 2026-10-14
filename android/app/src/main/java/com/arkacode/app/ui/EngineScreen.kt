@@ -188,6 +188,7 @@ fun EngineScreen(
                 ReadyScreen(
                     version = s.version,
                     port = port,
+                    password = password,
                     engine = engine,
                     isDark = darkTheme,
                     onToggleTheme = onToggleTheme,
@@ -309,6 +310,7 @@ private fun BootScreen(
 private fun ReadyScreen(
     version: String,
     port: Int,
+    password: String,
     engine: EngineManager,
     onStop: () -> Unit,
     onOpenChat: (ChatSession) -> Unit,
