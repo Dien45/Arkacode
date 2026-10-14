@@ -39,4 +39,19 @@ object SecureStore {
                 .apply()
         }
     }
+
+    /** API key provider (mis. "openai"); null bila belum disimpan. */
+    fun getAuth(context: Context, name: String): String? = runCatching {
+        prefs(context).getString("provider_key_$name", null)
+    }.getOrNull()
+
+    /** Kosong = hapus. */
+    fun setAuth(context: Context, name: String, value: String) {
+        runCatching {
+            val e = prefs(context).edit()
+            if (value.isBlank()) e.remove("provider_key_$name")
+            else e.putString("provider_key_$name", value.trim())
+            e.apply()
+        }
+    }
 }

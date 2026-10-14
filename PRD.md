@@ -98,7 +98,7 @@ Pola kerja tiap fase (warisan Arka): patch kecil → PR → CI build APK → mer
 | Baterai/thermal untuk turn panjang | Terbuka | `prompt_async` + notifikasi; stop selalu tersedia |
 | Secret (password server, auth.json) | Terkontrol | EncryptedSharedPreferences; tidak pernah di-log |
 
-## 8. Status implementasi (di `main`, per 2026-10-14; batch F4: backup+rilis+kredensial+SSE)
+## 8. Status implementasi (di `main`, per 2026-10-14; +layar Providers)
 
 Sudah:
 - F0: skeleton Gradle+CI, proot Alpine, ServerManager (unduh v1.19.0 musl+sha256, `serve` + tunggu health, stop, serve.log), OpenCodeClient (basic-auth, health, GET mentah).
@@ -107,10 +107,11 @@ Sudah:
 - F1 chat: kirim async, refresh near-live (poll 2 dtk), abort/interrupt, approval (Tolak/Izinkan/Selalu), salin pesan + blok kode + output tool, picker model per sesi (+ switch server-side), render markdown, thinking collapse, input aman keyboard.
 - Fondasi: backup rules terpasang di manifest, CI debug + release hijau, password server terenkripsi (+editor port/password).
 - Event server (SSE) sebagai trigger refresh live; polling tetap jaring pengaman.
+- Layar Penyedia AI: daftar provider + model (badge Gratis), isi/hapus API key per provider (terenkripsi, disuntik sebagai env saat serve nyala).
 
 Belum:
 - SSE penuh dengan parsing semantik event (kini trigger mentah saja).
-- Layar Providers/Auth (daftar + kunci/OAuth) dan config editor.
+- OAuth login Zen + config editor (kunci API manual sudah).
 - Files UI (tree/baca/cari) — baru API mentah.
 - Agents/commands/MCP UI; diff/revert/share/summarize/compact/fork UI.
 - i18n; tema terang/gelap sudah.
