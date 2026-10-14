@@ -3,6 +3,7 @@ package com.arkacode.app.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -92,26 +93,25 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
         loading = true
         error = null
         scope.launch {
-            providers = runCatching {
+            val ps = runCatching {
                 withContext(Dispatchers.IO) { client.listProviders() }
             }.onFailure { error = it.message }.getOrNull()
+            providers = ps
             models = runCatching {
                 withContext(Dispatchers.IO) { client.listModels() }
             }.getOrDefault(emptyList())
+            saved = withContext(Dispatchers.IO) {
+                // tandai provider yang sudah punya kunci tersimpan
+                (ps ?: emptyList()).mapNotNull { p ->
+                    val has = runCatching { SecureStore.getAuth(context, p.id) }.getOrNull()
+                    if (!has.isNullOrBlank()) p.id else null
+                }.toSet()
+            }
             loading = false
         }
     }
 
-    LaunchedEffect(Unit) {
-        load()
-        saved = withContext(Dispatchers.IO) {
-            // tandai provider yang sudah punya kunci tersimpan
-            (providers ?: emptyList()).mapNotNull { p ->
-                val has = runCatching { SecureStore.getAuth(context, p.id) }.getOrNull()
-                if (!has.isNullOrBlank()) p.id else null
-            }.toSet()
-        }
-    }
+    LaunchedEffect(Unit) { load() }
 
     Scaffold(
         topBar = {
@@ -142,20 +142,16 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-            ) {
+            ClayCard(contentPadding = PaddingValues(0.dp)) {
                 Text(
                     I18n.s.providersHelp,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(12.dp),
                 )
             }
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp)),
+            ClayCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(0.dp),
             ) {
                 Row(
                     Modifier
@@ -202,10 +198,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(list, key = { it.id }) { p ->
                     val ms = byProvider[p.id] ?: emptyList()
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp)),
-                    ) {
+                    ClayCard(contentPadding = PaddingValues(0.dp)) {
                         Column(Modifier.padding(10.dp)) {
                             Row(
                                 Modifier

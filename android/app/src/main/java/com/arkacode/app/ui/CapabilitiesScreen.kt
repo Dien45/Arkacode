@@ -2,6 +2,7 @@ package com.arkacode.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -150,18 +151,16 @@ private fun <T> CapsList(items: List<T>?, empty: String, row: @Composable (T) ->
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(items, key = { it.hashCode() }) { row(it) }
+            items(items) { item -> row(item) }
         }
     }
 }
 
 @Composable
 private fun CapsRow(title: String, subtitle: String, tag: String?) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
+    ClayCard(
         modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(0.dp),
     ) {
         Row(
             Modifier
