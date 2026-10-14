@@ -70,7 +70,6 @@ fun EngineScreen() {
 
     var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
     var chatTarget by remember { mutableStateOf<ChatSession?>(null) }
-    var showFiles by remember { mutableStateOf(false) }
     var lines by remember { mutableStateOf(listOf<String>()) }
     var failMsg by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
@@ -156,13 +155,7 @@ fun EngineScreen() {
         }
         is Screen.Ready -> {
             val target = chatTarget
-            if (showFiles) {
-                FilesScreen(
-                    port = port,
-                    password = DEFAULT_PASSWORD,
-                    onBack = { showFiles = false },
-                )
-            } else if (target != null) {
+            if (target != null) {
                 ChatScreen(
                     sessionId = target.id,
                     sessionTitle = target.title,
@@ -177,7 +170,7 @@ fun EngineScreen() {
                     version = s.version,
                     port = port,
                     engine = engine,
-                    onOpenFiles = { showFiles = true },
+
                     onStop = {
                         engine.stopServer()
                         lines = lines + "[${stamp()}] server dihentikan."
@@ -278,7 +271,6 @@ private fun ReadyScreen(
     onStop: () -> Unit,
     onOpenChat: (ChatSession) -> Unit,
     onNewSession: (ChatSession) -> Unit,
-    onOpenFiles: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -326,7 +318,7 @@ private fun ReadyScreen(
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Sesi (${sessions?.size ?: "…"})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onOpenFiles) { Text("Files") }
+
             OutlinedButton(
                 onClick = {
                     creating = true

@@ -33,6 +33,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -94,6 +95,7 @@ fun ChatScreen(
     var showPicker by remember { mutableStateOf(false) }
     var pollJob by remember { mutableStateOf<Job?>(null) }
     var waitJob by remember { mutableStateOf<Job?>(null) }
+    var showFilesTab by remember { mutableStateOf(false) }
 
     suspend fun refreshAll() {
         messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
@@ -163,6 +165,11 @@ fun ChatScreen(
         val count = listState.layoutInfo.totalItemsCount
         if (count > 0) listState.scrollToItem(count - 1)
     }
+    LaunchedEffect(showFilesTab) {
+        if (!showFilesTab) {
+            messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -176,13 +183,15 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            ChatInput(
+            if (!showFilesTab) {
+                ChatInput(
                 input = input,
                 onInputChange = { input = it },
                 busy = busy,
                 onSend = { send(input) },
                 onStop = { stopAll() },
-            )
+                )
+            }
         },
     ) { padding ->
         Column(
@@ -206,9 +215,31 @@ fun ChatScreen(
                     TextButton(onClick = { error = null }) { Text("Tutup") }
                 }
             }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(
+                    selected = !showFilesTab,
+                    onClick = { showFilesTab = false },
+                    label = { Text("Chat") },
+                )
+                FilterChip(
+                    selected = showFilesTab,
+                    onClick = { showFilesTab = true },
+                    label = { Text("Files") },
+                )
+            }
+            if (showFilesTab) {
+                FilesPane(port = port, password = password, modifier = Modifier.weight(1f))
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -233,6 +264,7 @@ fun ChatScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
