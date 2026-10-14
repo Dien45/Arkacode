@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -316,6 +317,27 @@ class OpenCodeClient(
         call(postReq("/api/session/$sessionId/model", body.toString()))
     }
 
+    /** Semua model flat dari server (sumber kebenaran untuk picker). */
+    suspend fun listModels(): List<ModelInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/model")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() }
+            ?: (el as? JsonArray) ?: return@withContext emptyList()
+        arr.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val mid = o.str("id") ?: return@mapNotNull null
+            val pid = o.str("providerID") ?: return@mapNotNull null
+            val costs = o.arr("cost")
+            val free = costs.isNotEmpty() && costs.all { c ->
+                val co = c as? JsonObject ?: return@all false
+                val inp = (co["input"] as? JsonPrimitive)?.doubleOrNull ?: Double.NaN
+                val out = (co["output"] as? JsonPrimitive)?.doubleOrNull ?: Double.NaN
+                !inp.isNaN() && !out.isNaN() && inp == 0.0 && out == 0.0
+            }
+            ModelInfo(mid, o.str("name") ?: mid, pid, free)
+        }
+    }
+
     suspend fun listProviders(): List<ProviderInfo> = withContext(Dispatchers.IO) {
         val el = runCatching { call(getReq("/api/provider")) }.getOrNull()
             ?: return@withContext emptyList()
@@ -324,12 +346,7 @@ class OpenCodeClient(
         arr.mapNotNull { item ->
             val o = item as? JsonObject ?: return@mapNotNull null
             val id = o.str("id") ?: o.str("name") ?: return@mapNotNull null
-            val models = o.arr("models").mapNotNull { m ->
-                val mo = m as? JsonObject ?: return@mapNotNull null
-                val mid = mo.str("id") ?: mo.str("name") ?: return@mapNotNull null
-                ModelInfo(mid, mo.str("name") ?: mid)
-            }
-            ProviderInfo(id, o.str("name") ?: id, models)
+            ProviderInfo(id, o.str("name") ?: id, emptyList())
         }
     }
 }

@@ -48,4 +48,13 @@ class SessionUiPrefs(private val context: Context) {
             prefs[stringPreferencesKey("hidden_sessions")] = cur.joinToString("\n")
         }
     }
+
+    suspend fun themeMode(): String? =
+        context.uiPrefsStore.data.map { prefs ->
+            prefs[stringPreferencesKey("theme_mode")]
+        }.first()
+
+    suspend fun setThemeMode(mode: String) {
+        context.uiPrefsStore.edit { it[stringPreferencesKey("theme_mode")] = mode }
+    }
 }
