@@ -407,7 +407,7 @@ class EngineManager(private val context: Context) {
             "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
             "PROOT_NO_SECCOMP=1",
             "OPENCODE_SERVER_PASSWORD=$password",
-            ") + extraEnv.map { (k, v) -> "$k=$v" } + listOf(
+        ) + extraEnv.map { (k, v) -> "$k=$v" } + listOf(
             "/opt/arkacode/opencode",
             "serve",
             "--port", port.toString(),
