@@ -76,20 +76,20 @@ fun ModelPickerContent(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Pilih model", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(I18n.s.pickModel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Cari…") },
+                placeholder = { Text(I18n.s.searchHint) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             val all = models
             if (all == null) {
-                Text("memuat…", style = MaterialTheme.typography.bodyMedium)
+                Text(I18n.s.loading, style = MaterialTheme.typography.bodyMedium)
             } else if (all.isEmpty()) {
                 Text(
-                    "Tidak ada model dari server. Pastikan penyedia sudah dikonfigurasi (butuh login/API key di server opencode).",
+                    I18n.s.noModels,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
@@ -121,7 +121,7 @@ fun ModelPickerContent(
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.weight(1f),
                                 )
-                                Text("${ms.size} model", style = MaterialTheme.typography.labelSmall)
+                                Text(I18n.s.modelsCount(ms.size), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         if (pid in expanded) {
@@ -149,7 +149,7 @@ fun ModelPickerContent(
                                             ),
                                         ) {
                                             Text(
-                                                "Gratis",
+                                                I18n.s.free,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                             )
@@ -157,7 +157,7 @@ fun ModelPickerContent(
                                         Spacer(Modifier.width(6.dp))
                                     }
                                     if (selected) {
-                                        Icon(Icons.Default.Check, contentDescription = "Aktif")
+                                        Icon(Icons.Default.Check, contentDescription = I18n.s.activeBadge)
                                     }
                                 }
                             }

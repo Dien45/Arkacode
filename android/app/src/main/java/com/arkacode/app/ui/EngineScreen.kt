@@ -92,6 +92,9 @@ fun EngineScreen(
             if (savedPw.isNotEmpty()) password = savedPw
         }
         credsReady = true
+        runCatching { com.arkacode.app.core.SessionUiPrefs(context).langCode() }.getOrNull()?.let { code ->
+            I18n.lang = AppLang.entries.firstOrNull { it.code == code } ?: AppLang.ID
+        }
     }
 
     var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
@@ -237,18 +240,18 @@ fun EngineScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("Server dihentikan.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(I18n.s.stoppedTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = port.toString(),
                     onValueChange = { port = it.filter(Char::isDigit).take(5).toIntOrNull() ?: port },
-                    label = { Text("Port") },
+                    label = { Text(I18n.s.port) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Password server") },
+                    label = { Text(I18n.s.serverPassword) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -262,7 +265,7 @@ fun EngineScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Simpan & start lagi") }
+                ) { Text(I18n.s.saveStart) }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -298,7 +301,7 @@ private fun BootScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                "Menyiapkan opencode…",
+                I18n.s.preparing,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
@@ -307,8 +310,8 @@ private fun BootScreen(
         }
         if (working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         failMsg?.let {
-            Text("Gagal: $it", color = MaterialTheme.colorScheme.error)
-            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Coba lagi") }
+            Text(I18n.s.failedPrefix + it, color = MaterialTheme.colorScheme.error)
+            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text(I18n.s.retry) }
         }
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -385,17 +388,21 @@ private fun ReadyScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Arkacode", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(I18n.s.appName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    "server jalan · opencode v$version · port $port",
+                    I18n.s.tagline(version, port),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            TextButton(onClick = {
+                I18n.lang = if (I18n.lang == AppLang.ID) AppLang.EN else AppLang.ID
+                scope.launch { runCatching { uiPrefs.setLangCode(I18n.lang.code) } }
+            }) { Text(if (I18n.lang == AppLang.ID) "EN" else "ID") }
             TextButton(onClick = onToggleTheme) { Text(if (isDark) "\u2600\uFE0F" else "\uD83C\uDF19") }
-            OutlinedButton(onClick = onStop) { Text("Stop") }
+            OutlinedButton(onClick = onStop) { Text(I18n.s.stop) }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Sesi (${sessions?.size ?: "…"})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(I18n.s.sessionsCount(sessions?.size ?: 0), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
 
 
             OutlinedButton(
@@ -412,16 +419,16 @@ private fun ReadyScreen(
                     }
                 },
                 enabled = !loading && !creating,
-            ) { Text("+ Sesi") }
-            OutlinedButton(onClick = { load() }, enabled = !loading) { Text("Muat ulang") }
+            ) { Text(I18n.s.newSession) }
+            OutlinedButton(onClick = { load() }, enabled = !loading) { Text(I18n.s.reload) }
         }
         val all = sessions
         val list = all?.filter { it.id !in hidden }
         if (list == null) {
-            Text(if (loading) "memuat…" else "gagal memuat sesi.", style = MaterialTheme.typography.bodyMedium)
+            Text(if (loading) I18n.s.loadingSessions else I18n.s.loadSessionsFailed, style = MaterialTheme.typography.bodyMedium)
         } else if (list.isEmpty()) {
             Text(
-                "Belum ada sesi. Ketuk + Sesi untuk mulai chat.",
+                I18n.s.noSessions,
                 style = MaterialTheme.typography.bodyMedium,
             )
         } else {
@@ -433,15 +440,15 @@ private fun ReadyScreen(
                     ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(shown.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
+                                    Text(shown.title.ifBlank { I18n.s.noTitle }, fontWeight = FontWeight.SemiBold)
                                     Text(s.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
                                 }
                                 TextButton(onClick = {
                                     renameTarget = s
                                     renameDraft = titles[s.id] ?: s.title
-                                }) { Text("Nama") }
+                                }) { Text(I18n.s.name) }
                                 TextButton(onClick = { deleteTarget = s }) {
-                                    Text("Hapus", color = MaterialTheme.colorScheme.error)
+                                    Text(I18n.s.deleteKey, color = MaterialTheme.colorScheme.error)
                                 }
                             }
                     }
@@ -454,19 +461,19 @@ private fun ReadyScreen(
                 selected = true,
                 onClick = {},
                 icon = { Icon(Icons.Default.List, contentDescription = null) },
-                label = { Text("Sesi") },
+                label = { Text(I18n.s.navSessions) },
             )
             NavigationBarItem(
                 selected = false,
                 onClick = onOpenProviders,
                 icon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
-                label = { Text("AI") },
+                label = { Text(I18n.s.navAI) },
             )
             NavigationBarItem(
                 selected = false,
                 onClick = onOpenCapabilities,
                 icon = { Icon(Icons.Default.Build, contentDescription = null) },
-                label = { Text("Kapabilitas") },
+                label = { Text(I18n.s.navCaps) },
             )
         }
     }
@@ -474,12 +481,12 @@ private fun ReadyScreen(
     renameTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("Ganti nama sesi") },
+            title = { Text(I18n.s.renameSession) },
             text = {
                 OutlinedTextField(
                     value = renameDraft,
                     onValueChange = { renameDraft = it },
-                    label = { Text("Nama") },
+                    label = { Text(I18n.s.name) },
                     singleLine = true,
                 )
             },
@@ -496,10 +503,10 @@ private fun ReadyScreen(
                         }
                         renameTarget = null
                     }
-                }) { Text("Simpan") }
+                }) { Text(I18n.s.save) }
             },
             dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text("Batal") }
+                TextButton(onClick = { renameTarget = null }) { Text(I18n.s.cancel) }
             },
         )
     }
@@ -507,9 +514,9 @@ private fun ReadyScreen(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("Sembunyikan sesi?") },
+            title = { Text(I18n.s.hideSession) },
             text = {
-                Text("Sesi disembunyikan dari daftar ini. Server opencode tidak menyediakan hapus sesi, jadi data tetap ada di server.")
+                Text(I18n.s.hideSessionBody)
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -518,10 +525,10 @@ private fun ReadyScreen(
                         hidden = hidden + target.id
                         deleteTarget = null
                     }
-                }) { Text("Sembunyikan", color = MaterialTheme.colorScheme.error) }
+                }) { Text(I18n.s.hide, color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Batal") }
+                TextButton(onClick = { deleteTarget = null }) { Text(I18n.s.cancel) }
             },
         )
     }

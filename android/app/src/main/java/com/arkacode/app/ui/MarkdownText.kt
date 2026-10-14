@@ -179,7 +179,7 @@ private fun CodeBlock(text: String, background: Color) {
                     copied = true
                 }) {
                     Text(
-                        if (copied) "Disalin ✓" else "Salin",
+                        if (copied) I18n.s.copied else I18n.s.copy,
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
