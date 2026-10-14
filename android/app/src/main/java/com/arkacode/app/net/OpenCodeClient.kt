@@ -661,10 +661,14 @@ class OpenCodeClient(
         )
     }
 
-    suspend fun oauthStatus(attemptID: String): OAuthStatus = withContext(Dispatchers.IO) {
+    /**
+     * Status attempt OAuth. `null` = gagal jaringan sementara (server tak
+     * terjangkau) — pemanggil sebaiknya lanjut polling, bukan menyimpulkan gagal.
+     */
+    suspend fun oauthStatus(attemptID: String): OAuthStatus? = withContext(Dispatchers.IO) {
         val el = runCatching {
             call(getReq("/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8")))
-        }.getOrNull() ?: return@withContext OAuthStatus("failed", null)
+        }.getOrNull() ?: return@withContext null
         val o = (el as? JsonObject)?.obj("data") ?: (el as? JsonObject) ?: JsonObject(emptyMap())
         OAuthStatus(o.str("status") ?: "pending", o.str("message"))
     }
