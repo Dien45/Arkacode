@@ -281,6 +281,7 @@ private fun ReadyScreen(
     onNewSession: (ChatSession) -> Unit,
     isDark: Boolean,
     onToggleTheme: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uiPrefs = remember { com.arkacode.app.core.SessionUiPrefs(context) }
