@@ -3,14 +3,21 @@ package com.arkacode.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -271,6 +278,7 @@ private fun ChatBar(
         Row(
             Modifier
                 .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -307,7 +315,8 @@ private fun ChatInput(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
@@ -368,12 +377,26 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                     Text(t, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(4.dp))
                 }
-                item.reasonings.forEach { r ->
-                    Text(
-                        r.take(600),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (item.reasonings.isNotEmpty()) {
+                    var showThinking by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showThinking = !showThinking }) {
+                        Text(
+                            if (showThinking) "Sembunyikan pemikiran" else "Lihat pemikiran (${item.reasonings.size})",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    AnimatedVisibility(visible = showThinking) {
+                        Column {
+                            item.reasonings.forEach { r ->
+                                Text(
+                                    r,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(4.dp))
                 }
                 item.tools.forEach { tool ->
