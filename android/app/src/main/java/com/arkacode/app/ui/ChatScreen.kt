@@ -374,7 +374,10 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
         ) {
             Column(Modifier.padding(12.dp, 8.dp)) {
                 item.texts.forEach { t ->
-                    Text(t, style = MaterialTheme.typography.bodyMedium)
+                    MarkdownText(
+                        markdown = t,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Spacer(Modifier.height(4.dp))
                 }
                 if (item.reasonings.isNotEmpty()) {
