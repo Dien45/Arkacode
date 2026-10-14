@@ -148,6 +148,13 @@ class OpenCodeClient(
         String(bytes, Charsets.UTF_8).take(maxChars)
     }
 
+    /** Baca file mentah (untuk preview gambar). */
+    suspend fun readFileBytes(path: String, maxBytes: Int = 8_000_000): ByteArray = withContext(Dispatchers.IO) {
+        val bytes = callBytes(getReq("/api/fs/read/" + encodeRelPath(path)))
+        if (bytes.size > maxBytes) throw IllegalStateException("File terlalu besar untuk preview")
+        bytes
+    }
+
     /** Cari file/direktori rekursif. */
     suspend fun findFiles(query: String, limit: Int = 50): List<FsEntry> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()

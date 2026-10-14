@@ -3,6 +3,7 @@ package com.arkacode.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -53,13 +53,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * F2 Files: jelajahi workspace server (tree per folder), baca file teks,
+ * Panel Files untuk dipakai di dalam tab chat (F2+): jelajahi workspace
+ * server (tree per folder), baca file teks, preview markdown/gambar,
  * cari file. Path relatif ke working dir server (/root/workspace).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
-    val context = LocalContext.current
+fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val client = remember(port, password) { OpenCodeClient(port = port, password = password) }
 
@@ -71,6 +71,7 @@ fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
     var searching by remember { mutableStateOf(false) }
     var openedPath by remember { mutableStateOf<String?>(null) }
     var openedText by remember { mutableStateOf<String?>(null) }
+    var openedBytes by remember { mutableStateOf<ByteArray?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
 
     fun loadDir(dir: String) {
@@ -78,6 +79,7 @@ fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
         loading = true
         error = null
         openedPath = null
+        openedBytes = null
         job = scope.launch {
             entries = runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -93,14 +95,28 @@ fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
         loading = true
         error = null
         job = scope.launch {
-            val text = runCatching {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    client.readFile(path)
+            if (isImageExt(path)) {
+                val bytes = runCatching {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        client.readFileBytes(path)
+                    }
+                }.onFailure { error = it.message }.getOrNull()
+                if (bytes != null) {
+                    openedPath = path
+                    openedBytes = bytes
+                    openedText = ""
                 }
-            }.onFailure { error = it.message }.getOrNull()
-            if (text != null) {
-                openedPath = path
-                openedText = text
+            } else {
+                val text = runCatching {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        client.readFile(path)
+                    }
+                }.onFailure { error = it.message }.getOrNull()
+                if (text != null) {
+                    openedPath = path
+                    openedBytes = null
+                    openedText = text
+                }
             }
             loading = false
         }
@@ -112,6 +128,7 @@ fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
         searching = true
         error = null
         openedPath = null
+        openedBytes = null
         job = scope.launch {
             entries = runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -124,154 +141,147 @@ fun FilesScreen(port: Int, password: String, onBack: () -> Unit) {
 
     LaunchedEffect(Unit) { loadDir("") }
 
-    Scaffold(
-        topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.fillMaxWidth()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = {
-                            if (openedPath != null) {
-                                openedPath = null
-                            } else onBack()
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
-                        }
-                        Text(
-                            if (openedPath != null) openedPath!!.substringAfterLast('/') else "Files",
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = {
-                            searching = false
-                            query = ""
-                            loadDir(cwd)
-                        }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Muat ulang")
-                        }
-                    }
-                    if (openedPath == null) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedTextField(
-                                value = query,
-                                onValueChange = { query = it },
-                                placeholder = { Text("Cari file…") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(onClick = { search() }, enabled = query.isNotBlank()) {
-                                Icon(Icons.Default.Search, contentDescription = "Cari")
-                            }
-                        }
-                        if (cwd.isNotBlank() && !searching) {
-                            Breadcrumb(
-                                cwd = cwd,
-                                onRoot = {
-                                    cwd = ""
-                                    loadDir("")
-                                },
-                                onJump = {
-                                    cwd = it
-                                    loadDir(it)
-                                },
-                            )
-                        }
-                        if (searching) {
-                            TextButton(onClick = {
-                                searching = false
-                                query = ""
-                                loadDir(cwd)
-                            }) { Text("Tutup pencarian") }
-                        }
-                    }
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (openedPath != null) {
+                    TextButton(onClick = { openedPath = null }) { Text("‹ Daftar") }
+                }
+                Text(
+                    if (openedPath != null) openedPath!!.substringAfterLast('/') else "Files",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = {
+                    searching = false
+                    query = ""
+                    loadDir(cwd)
+                }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Muat ulang")
                 }
             }
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 12.dp),
-        ) {
-            error?.let {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+            if (openedPath == null) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Cari file…") },
+                        singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { error = null }) { Text("Tutup") }
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = { search() }, enabled = query.isNotBlank()) {
+                        Icon(Icons.Default.Search, contentDescription = "Cari")
+                    }
+                }
+                if (cwd.isNotBlank() && !searching) {
+                    Breadcrumb(
+                        cwd = cwd,
+                        onRoot = {
+                            cwd = ""
+                            loadDir("")
+                        },
+                        onJump = {
+                            cwd = it
+                            loadDir(it)
+                        },
+                    )
+                }
+                if (searching) {
+                    TextButton(onClick = {
+                        searching = false
+                        query = ""
+                        loadDir(cwd)
+                    }) { Text("Tutup pencarian") }
                 }
             }
-            if (loading && entries == null && openedPath == null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.padding(8.dp))
-                    Text("memuat…", style = MaterialTheme.typography.bodySmall)
-                }
+        }
+    }
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
+    ) {
+        error?.let {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { error = null }) { Text("Tutup") }
             }
-            val open = openedPath
-            if (open != null) {
-                FileView(path = open, content = openedText ?: "memuat…")
+        }
+        if (loading && entries == null && openedPath == null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.padding(8.dp))
+                Text("memuat…", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val open = openedPath
+        if (open != null) {
+            FileView(path = open, content = openedText ?: "memuat…", imageBytes = openedBytes)
+        } else {
+            val list = entries ?: emptyList()
+            if (list.isEmpty() && !loading) {
+                Text("Kosong.", style = MaterialTheme.typography.bodyMedium)
             } else {
-                val list = entries ?: emptyList()
-                if (list.isEmpty() && !loading) {
-                    Text("Kosong.", style = MaterialTheme.typography.bodyMedium)
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val dirs = list.filter { it.isDir }.sortedBy { it.path }
-                        val files = list.filterNot { it.isDir }.sortedBy { it.path }
-                        items(dirs + files, key = { it.path }) { e ->
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ),
-                                modifier = Modifier.clip(RoundedCornerShape(10.dp)),
-                            ) {
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            if (e.isDir) {
-                                                cwd = e.path
-                                                loadDir(e.path)
-                                            } else {
-                                                openFile(e.path)
-                                            }
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val dirs = list.filter { it.isDir }.sortedBy { it.path }
+                    val files = list.filterNot { it.isDir }.sortedBy { it.path }
+                    items(dirs + files, key = { it.path }) { e ->
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)),
+                        ) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (e.isDir) {
+                                            cwd = e.path
+                                            loadDir(e.path)
+                                        } else {
+                                            openFile(e.path)
                                         }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(if (e.isDir) "📁" else "📄")
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        e.path.substringAfterLast('/'),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(if (e.isDir) "📁" else "📄")
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    e.path.substringAfterLast('/'),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f),
+                                )
                             }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
+
+private fun isImageExt(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp", "gif")
 
 @Composable
 private fun Breadcrumb(cwd: String, onRoot: () -> Unit, onJump: (String) -> Unit) {
@@ -295,9 +305,10 @@ private fun Breadcrumb(cwd: String, onRoot: () -> Unit, onJump: (String) -> Unit
 }
 
 @Composable
-private fun FileView(path: String, content: String) {
+private fun FileView(path: String, content: String, imageBytes: ByteArray?) {
     val context = LocalContext.current
     var copied by remember(path) { mutableStateOf(false) }
+    val ext = path.substringAfterLast('.', "").lowercase()
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -316,10 +327,34 @@ private fun FileView(path: String, content: String) {
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(
-            content,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-        )
+        if (ext == "md" || ext == "markdown") {
+            MarkdownText(markdown = content)
+        } else if (imageBytes != null) {
+            val bitmap = remember(imageBytes) { decodePreview(imageBytes) }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = path,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Text("(gagal tampilkan gambar)", style = MaterialTheme.typography.bodySmall)
+            }
+        } else {
+            Text(
+                content,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
     }
 }
+
+private fun decodePreview(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? = runCatching {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
+    val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+}.getOrNull()
