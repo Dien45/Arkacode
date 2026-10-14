@@ -15,11 +15,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -269,8 +272,15 @@ private fun ReadyScreen(
     onNewSession: (ChatSession) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uiPrefs = remember { com.arkacode.app.core.SessionUiPrefs(context) }
     var sessions by remember { mutableStateOf<List<ChatSession>?>(null) }
+    var titles by remember { mutableStateOf(mapOf<String, String>()) }
+    var hidden by remember { mutableStateOf(setOf<String>()) }
     var loading by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<ChatSession?>(null) }
     var creating by remember { mutableStateOf(false) }
 
     fun load() {
@@ -281,6 +291,8 @@ private fun ReadyScreen(
                     OpenCodeClient(port = port, password = DEFAULT_PASSWORD).listSessions()
                 }
             }.getOrNull()
+            titles = runCatching { uiPrefs.titleOverrides() }.getOrDefault(titles)
+            hidden = runCatching { uiPrefs.hiddenIds() }.getOrDefault(hidden)
             loading = false
         }
     }
@@ -322,7 +334,8 @@ private fun ReadyScreen(
             ) { Text("+ Sesi") }
             OutlinedButton(onClick = { load() }, enabled = !loading) { Text("Muat ulang") }
         }
-        val list = sessions
+        val all = sessions
+        val list = all?.filter { it.id !in hidden }
         if (list == null) {
             Text(if (loading) "memuat…" else "gagal memuat sesi.", style = MaterialTheme.typography.bodyMedium)
         } else if (list.isEmpty()) {
@@ -333,18 +346,85 @@ private fun ReadyScreen(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 list.take(50).forEach { s ->
+                    val shown = s.copy(title = titles[s.id] ?: s.title)
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        modifier = Modifier.clickable { onOpenChat(s) },
+                        modifier = Modifier.clickable { onOpenChat(shown) },
                     ) {
                         Column(Modifier.padding(10.dp)) {
-                            Text(s.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
-                            Text(s.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(shown.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
+                                    Text(s.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                }
+                                TextButton(onClick = {
+                                    renameTarget = s
+                                    renameDraft = titles[s.id] ?: s.title
+                                }) { Text("Nama") }
+                                TextButton(onClick = { deleteTarget = s }) {
+                                    Text("Hapus", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Ganti nama sesi") },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    label = { Text("Nama") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val name = renameDraft.trim()
+                        if (name.isEmpty()) {
+                            runCatching { uiPrefs.clearTitle(target.id) }
+                            titles = titles - target.id
+                        } else {
+                            runCatching { uiPrefs.setTitle(target.id, name.take(80)) }
+                            titles = titles + (target.id to name.take(80))
+                        }
+                        renameTarget = null
+                    }
+                }) { Text("Simpan") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("Batal") }
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Sembunyikan sesi?") },
+            text = {
+                Text("Sesi disembunyikan dari daftar ini. Server opencode tidak menyediakan hapus sesi, jadi data tetap ada di server.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        runCatching { uiPrefs.setHidden(target.id, true) }
+                        hidden = hidden + target.id
+                        deleteTarget = null
+                    }
+                }) { Text("Sembunyikan", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Batal") }
+            },
+        )
     }
 }
