@@ -170,6 +170,17 @@ fun ChatScreen(
             messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
         }
     }
+    // Event server sebagai trigger refresh live; polling 2 dtk tetap jaring pengaman.
+    LaunchedEffect(busy, sessionId) {
+        if (!busy) return@LaunchedEffect
+        try {
+            client.serverEvents().collect {
+                messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
+                pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+            }
+        } catch (e: Exception) {
+        }
+    }
 
     Scaffold(
         topBar = {

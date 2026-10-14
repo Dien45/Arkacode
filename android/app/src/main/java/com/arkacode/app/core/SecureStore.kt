@@ -1,0 +1,42 @@
+package com.arkacode.app.core
+
+import android.content.Context
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+
+/**
+ * Rahasia app (password server opencode, port) di penyimpanan terenkripsi.
+ * Tidak pernah di-log atau ditampilkan mentah selain kolom password UI.
+ */
+object SecureStore {
+    private const val FILE = "arkacode_secrets"
+
+    private fun prefs(context: Context) = run {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context,
+            FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    /** Pair(port, password); null bila belum pernah disimpan. */
+    fun load(context: Context): Pair<Int, String>? = runCatching {
+        val p = prefs(context)
+        if (!p.contains("server_port") && !p.contains("server_password")) return null
+        Pair(p.getInt("server_port", 4096), p.getString("server_password", "") ?: "")
+    }.getOrNull()
+
+    fun save(context: Context, port: Int, password: String) {
+        runCatching {
+            prefs(context).edit()
+                .putInt("server_port", port)
+                .putString("server_password", password)
+                .apply()
+        }
+    }
+}

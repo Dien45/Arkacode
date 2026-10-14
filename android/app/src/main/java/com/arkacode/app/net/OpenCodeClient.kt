@@ -1,6 +1,10 @@
 package com.arkacode.app.net
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -188,6 +192,60 @@ class OpenCodeClient(
             }
         })
     }
+
+    /**
+     * Aliran event server (SSE `/api/event`) — trigger mentah untuk refresh.
+     * Berhenti saat collector dibatalkan; error koneksi mengakhiri diam-diam
+     * (polling 2 dtk tetap jadi jaring pengaman).
+     */
+    fun serverEvents(): Flow<String> = callbackFlow {
+        val req = Request.Builder()
+            .url(baseUrl + "/api/event")
+            .header("Authorization", authHeader())
+            .build()
+        val call = client.newCall(req)
+        try {
+            val resp = call.execute()
+            if (!resp.isSuccessful) {
+                resp.close()
+                close()
+                return@callbackFlow
+            }
+            val reader = resp.body?.byteStream()?.bufferedReader()
+            if (reader == null) {
+                resp.close()
+                close()
+                return@callbackFlow
+            }
+            try {
+                var eventName = ""
+                val data = StringBuilder()
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    when {
+                        line.isBlank() -> {
+                            if (data.isNotEmpty()) {
+                                trySend(eventName.ifBlank { "message" } + " " + data.toString().take(160))
+                            }
+                            eventName = ""
+                            data.clear()
+                        }
+                        line.startsWith(":") -> {}
+                        line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
+                        line.startsWith("data:") -> {
+                            if (data.isNotEmpty()) data.append("\n")
+                            data.append(line.removePrefix("data:").trim())
+                        }
+                    }
+                }
+            } finally {
+                runCatching { resp.close() }
+            }
+        } catch (e: Exception) {
+            // koneksi putus — diam, polling yang ambil alih
+        }
+        awaitClose { runCatching { call.cancel() } }
+    }.flowOn(Dispatchers.IO)
 
     /** GET mentah untuk debug. */
     suspend fun get(path: String): String = withContext(Dispatchers.IO) {
