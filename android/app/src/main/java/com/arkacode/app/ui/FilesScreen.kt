@@ -150,10 +150,10 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (openedPath != null) {
-                    TextButton(onClick = { openedPath = null }) { Text("‹ Daftar") }
+                    TextButton(onClick = { openedPath = null }) { Text(I18n.s.backToList) }
                 }
                 Text(
-                    if (openedPath != null) openedPath!!.substringAfterLast('/') else "Files",
+                    if (openedPath != null) openedPath!!.substringAfterLast('/') else I18n.s.filesTitle,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
@@ -163,7 +163,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     query = ""
                     loadDir(cwd)
                 }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Muat ulang")
+                    Icon(Icons.Default.Refresh, contentDescription = I18n.s.reloadFiles)
                 }
             }
             if (openedPath == null) {
@@ -176,13 +176,13 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("Cari file…") },
+                        placeholder = { Text(I18n.s.searchFile) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
                     IconButton(onClick = { search() }, enabled = query.isNotBlank()) {
-                        Icon(Icons.Default.Search, contentDescription = "Cari")
+                        Icon(Icons.Default.Search, contentDescription = I18n.s.search)
                     }
                 }
                 if (cwd.isNotBlank() && !searching) {
@@ -203,7 +203,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                         searching = false
                         query = ""
                         loadDir(cwd)
-                    }) { Text("Tutup pencarian") }
+                    }) { Text(I18n.s.closeSearch) }
                 }
             }
         }
@@ -221,22 +221,22 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { error = null }) { Text("Tutup") }
+                TextButton(onClick = { error = null }) { Text(I18n.s.close) }
             }
         }
         if (loading && entries == null && openedPath == null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.padding(8.dp))
-                Text("memuat…", style = MaterialTheme.typography.bodySmall)
+                Text(I18n.s.loading, style = MaterialTheme.typography.bodySmall)
             }
         }
         val open = openedPath
         if (open != null) {
-            FileView(path = open, content = openedText ?: "memuat…", imageBytes = openedBytes)
+            FileView(path = open, content = openedText ?: I18n.s.loading, imageBytes = openedBytes)
         } else {
             val list = entries ?: emptyList()
             if (list.isEmpty() && !loading) {
-                Text("Kosong.", style = MaterialTheme.typography.bodyMedium)
+                Text(I18n.s.empty, style = MaterialTheme.typography.bodyMedium)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val dirs = list.filter { it.isDir }.sortedBy { it.path }
@@ -323,7 +323,7 @@ private fun FileView(path: String, content: String, imageBytes: ByteArray?) {
                 cm.setPrimaryClip(ClipData.newPlainText("file", content))
                 copied = true
             }) {
-                Text(if (copied) "Disalin ✓" else "Salin", style = MaterialTheme.typography.labelSmall)
+                Text(if (copied) I18n.s.copied else I18n.s.copy, style = MaterialTheme.typography.labelSmall)
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -338,7 +338,7 @@ private fun FileView(path: String, content: String, imageBytes: ByteArray?) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                Text("(gagal tampilkan gambar)", style = MaterialTheme.typography.bodySmall)
+                Text(I18n.s.previewFail, style = MaterialTheme.typography.bodySmall)
             }
         } else {
             Text(

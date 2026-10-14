@@ -123,10 +123,10 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = I18n.s.back)
                     }
                     Text(
-                        "Penyedia AI",
+                        I18n.s.providersTitle,
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f),
                     )
@@ -145,7 +145,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             ) {
                 Text(
-                    "Isi API key per provider — tersimpan terenkripsi di HP dan disuntik otomatis tiap server nyala. Berlaku setelah Stop → Start ulang. Model gratis Zen: daftar di opencode.ai/auth (boleh lewat browser HP), buat API key, tempel di provider OpenCode di bawah.",
+                    I18n.s.providersHelp,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(12.dp),
                 )
@@ -153,19 +153,19 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
             error?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { error = null }) { Text("Tutup") }
+                    TextButton(onClick = { error = null }) { Text(I18n.s.close) }
                 }
             }
             notice?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { notice = null }) { Text("Tutup") }
+                    TextButton(onClick = { notice = null }) { Text(I18n.s.close) }
                 }
             }
             if (loading && providers == null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.padding(8.dp))
-                    Text("memuat…", style = MaterialTheme.typography.bodySmall)
+                    Text(I18n.s.loading, style = MaterialTheme.typography.bodySmall)
                 }
             }
             val list = providers ?: emptyList()
@@ -196,21 +196,21 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                     Text("●", color = MaterialTheme.colorScheme.tertiary)
                                     Spacer(Modifier.width(4.dp))
                                 }
-                                Text("${ms.size} model", style = MaterialTheme.typography.labelSmall)
+                                Text(I18n.s.modelsCount(ms.size), style = MaterialTheme.typography.labelSmall)
                             }
                             if (p.id in expanded) {
                                 Spacer(Modifier.height(6.dp))
                                 val envs = ENV_HINTS[p.id]
                                 if (envs != null) {
                                     Text(
-                                        "Env: " + envs.joinToString(", "),
+                                        I18n.s.envFmt(envs.joinToString(", ")),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     OutlinedTextField(
                                         value = drafts[p.id] ?: "",
                                         onValueChange = { drafts = drafts + (p.id to it) },
-                                        placeholder = { Text(if (p.id in saved) "tersimpan (isi untuk ganti)" else "tempel API key…") },
+                                        placeholder = { Text(if (p.id in saved) I18n.s.savedHintReplace else I18n.s.pasteKey) },
                                         singleLine = true,
                                         visualTransformation = PasswordVisualTransformation(),
                                         modifier = Modifier.fillMaxWidth(),
@@ -224,9 +224,9 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                                 }
                                                 drafts = drafts - p.id
                                                 saved = if (v.isBlank()) saved - p.id else saved + p.id
-                                                notice = if (v.isBlank()) "Kunci ${p.name} dihapus." else "Kunci ${p.name} tersimpan. Stop → Start agar berlaku."
+                                                notice = if (v.isBlank()) I18n.s.keyDeleted(p.name) else I18n.s.keySaved(p.name)
                                             }
-                                        }) { Text("Simpan") }
+                                        }) { Text(I18n.s.saveKey) }
                                         TextButton(onClick = {
                                             scope.launch {
                                                 withContext(Dispatchers.IO) {
@@ -234,19 +234,19 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                                 }
                                                 drafts = drafts - p.id
                                                 saved = saved - p.id
-                                                notice = "Kunci ${p.name} dihapus."
+                                                notice = I18n.s.keyDeleted(p.name)
                                             }
-                                        }) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
+                                        }) { Text(I18n.s.deleteKey, color = MaterialTheme.colorScheme.error) }
                                     }
                                 } else {
                                     Text(
-                                        "Kunci diatur via opencode.json di server untuk provider ini.",
+                                        I18n.s.viaJson,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 if (ms.isNotEmpty()) {
-                                    Text("Model:", style = MaterialTheme.typography.labelMedium)
+                                    Text(I18n.s.modelsLabel, style = MaterialTheme.typography.labelMedium)
                                     ms.take(30).forEach { m ->
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
@@ -257,7 +257,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                             )
                                             if (m.free) {
                                                 Text(
-                                                    "Gratis",
+                                                    I18n.s.free,
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.tertiary,
                                                 )
@@ -265,7 +265,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                         }
                                     }
                                     if (ms.size > 30) {
-                                        Text("+${ms.size - 30} lainnya", style = MaterialTheme.typography.labelSmall)
+                                        Text(I18n.s.othersCount(ms.size - 30), style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }

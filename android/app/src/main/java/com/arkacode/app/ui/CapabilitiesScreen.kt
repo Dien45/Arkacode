@@ -38,7 +38,7 @@ import com.arkacode.app.net.CommandInfo
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.SkillInfo
 
-private enum class CapsTab(val label: String) { Agents("Agent"), Commands("Perintah"), Skills("Skill") }
+private enum class CapsTab { Agents, Commands, Skills }
 
 /**
  * Daftar kapabilitas opencode server: agent, perintah (slash command), dan skill.
@@ -72,10 +72,10 @@ fun CapabilitiesScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = I18n.s.back)
                 }
                 Text(
-                    "Kapabilitas",
+                    I18n.s.capsTitle,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -90,39 +90,39 @@ fun CapabilitiesScreen(
                     FilterChip(
                         selected = tab == t,
                         onClick = { tab = t },
-                        label = { Text(t.label) },
+                        label = { Text(if (t == CapsTab.Agents) I18n.s.tabAgents else if (t == CapsTab.Commands) I18n.s.tabCommands else I18n.s.tabSkills) },
                     )
                 }
             }
             when (tab) {
                 CapsTab.Agents -> CapsList(
                     items = agents,
-                    empty = "Tidak ada agent.",
+                    empty = I18n.s.noAgentsShort,
                 ) { a ->
                     CapsRow(
                         title = a.id,
-                        subtitle = a.description.ifBlank { "mode: ${a.mode}" },
+                        subtitle = a.description.ifBlank { I18n.s.modeFmt(a.mode) },
                         tag = a.mode,
                     )
                 }
                 CapsTab.Commands -> CapsList(
                     items = commands,
-                    empty = "Tidak ada perintah.",
+                    empty = I18n.s.noCommandsShort,
                 ) { c ->
                     CapsRow(
                         title = "/" + c.name,
-                        subtitle = c.description.ifBlank { "ketik /${c.name} di kolom chat" },
+                        subtitle = c.description.ifBlank { I18n.s.commandHint(c.name) },
                         tag = c.agent,
                     )
                 }
                 CapsTab.Skills -> CapsList(
                     items = skills,
-                    empty = "Tidak ada skill.",
+                    empty = I18n.s.noSkills,
                 ) { s ->
                     CapsRow(
                         title = s.name,
                         subtitle = s.description.ifBlank { s.location },
-                        tag = if (s.slash) "slash" else null,
+                        tag = if (s.slash) I18n.s.slashTag else null,
                     )
                 }
             }

@@ -57,4 +57,13 @@ class SessionUiPrefs(private val context: Context) {
     suspend fun setThemeMode(mode: String) {
         context.uiPrefsStore.edit { it[stringPreferencesKey("theme_mode")] = mode }
     }
+
+    suspend fun langCode(): String? =
+        context.uiPrefsStore.data.map { prefs ->
+            prefs[stringPreferencesKey("lang_code")]
+        }.first()
+
+    suspend fun setLangCode(code: String) {
+        context.uiPrefsStore.edit { it[stringPreferencesKey("lang_code")] = code }
+    }
 }

@@ -151,7 +151,7 @@ fun ChatScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = e.message ?: "gagal mengirim"
+                error = e.message ?: I18n.s.sendFail
                 busy = false
             }
         }
@@ -212,9 +212,9 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             ChatBar(
-                title = sessionTitle.ifBlank { "Sesi" },
-                modelLabel = pinnedModel?.let { "${it.providerID}/${it.id}" } ?: "Model server",
-                agentLabel = agentId ?: "agent",
+                title = sessionTitle.ifBlank { I18n.s.titleFallback },
+                modelLabel = pinnedModel?.let { "${it.providerID}/${it.id}" } ?: I18n.s.modelServer,
+                agentLabel = agentId ?: I18n.s.agentFallback,
                 busy = busy,
                 menuOpen = menuOpen,
                 canRevert = lastUser != null,
@@ -229,7 +229,7 @@ fun ChatScreen(
                     scope.launch {
                         error = null
                         runCatching { client.compactSession(sessionId) }
-                            .onFailure { error = it.message ?: "gagal ringkas" }
+                            .onFailure { error = it.message ?: I18n.s.compactFail }
                         refreshAll()
                     }
                 },
@@ -269,7 +269,7 @@ fun ChatScreen(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { error = null }) { Text("Tutup") }
+                    TextButton(onClick = { error = null }) { Text(I18n.s.close) }
                 }
             }
             Row(
@@ -281,12 +281,12 @@ fun ChatScreen(
                 FilterChip(
                     selected = !showFilesTab,
                     onClick = { showFilesTab = false },
-                    label = { Text("Chat") },
+                    label = { Text(I18n.s.chatTab) },
                 )
                 FilterChip(
                     selected = showFilesTab,
                     onClick = { showFilesTab = true },
-                    label = { Text("Files") },
+                    label = { Text(I18n.s.filesTab) },
                 )
             }
             if (showFilesTab) {
@@ -317,7 +317,7 @@ fun ChatScreen(
                     item("typing") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.padding(8.dp))
-                            Text("bekerja…", style = MaterialTheme.typography.bodySmall)
+                            Text(I18n.s.working, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -383,7 +383,7 @@ fun ChatScreen(
             onApply = {
                 scope.launch {
                     runCatching { client.commitRevert(sessionId) }
-                        .onFailure { error = it.message ?: "gagal revert" }
+                        .onFailure { error = it.message ?: I18n.s.revertFail }
                     revert = null
                     refreshAll()
                 }
@@ -425,7 +425,7 @@ private fun ChatBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = I18n.s.back)
             }
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
@@ -448,19 +448,19 @@ private fun ChatBar(
             }
             if (busy) {
                 IconButton(onClick = onStop) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop")
+                    Icon(Icons.Default.Stop, contentDescription = I18n.s.stop)
                 }
             }
             Box {
                 IconButton(onClick = onToggleMenu) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    Icon(Icons.Default.MoreVert, contentDescription = I18n.s.menu)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = onToggleMenu) {
-                    DropdownMenuItem(text = { Text("Agent…") }, onClick = onOpenAgents)
-                    DropdownMenuItem(text = { Text("Perintah…") }, onClick = onOpenCommands)
-                    DropdownMenuItem(text = { Text("Ringkas percakapan") }, onClick = onCompact)
+                    DropdownMenuItem(text = { Text(I18n.s.menuAgent) }, onClick = onOpenAgents)
+                    DropdownMenuItem(text = { Text(I18n.s.menuCommands) }, onClick = onOpenCommands)
+                    DropdownMenuItem(text = { Text(I18n.s.menuCompact) }, onClick = onCompact)
                     DropdownMenuItem(
-                        text = { Text("Revert ke pesan terakhir") },
+                        text = { Text(I18n.s.menuRevertLast) },
                         onClick = onRevert,
                         enabled = canRevert,
                     )
@@ -488,7 +488,7 @@ private fun ChatInput(
         OutlinedTextField(
             value = input,
             onValueChange = onInputChange,
-            placeholder = { Text("Tulis pesan…") },
+            placeholder = { Text(I18n.s.writeMessage) },
             singleLine = false,
             minLines = 1,
             maxLines = 5,
@@ -497,11 +497,11 @@ private fun ChatInput(
         Spacer(Modifier.width(8.dp))
         if (busy) {
             IconButton(onClick = onStop) {
-                Icon(Icons.Default.Stop, contentDescription = "Stop")
+                Icon(Icons.Default.Stop, contentDescription = I18n.s.stop)
             }
         } else {
             IconButton(onClick = onSend, enabled = input.isNotBlank()) {
-                Icon(Icons.Default.Send, contentDescription = "Kirim")
+                Icon(Icons.Default.Send, contentDescription = I18n.s.send)
             }
         }
     }
@@ -519,12 +519,12 @@ private fun UserBubble(item: ChatItem.User, onRevert: () -> Unit) {
                 Text(item.text, style = MaterialTheme.typography.bodyMedium)
                 if (item.fileCount > 0) {
                     Text(
-                        "${item.fileCount} lampiran",
+                        I18n.s.attachments(item.fileCount),
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
                 TextButton(onClick = onRevert) {
-                    Text("Revert ke sini", style = MaterialTheme.typography.labelSmall)
+                    Text(I18n.s.revertHere, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -553,7 +553,7 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                     var showThinking by remember { mutableStateOf(false) }
                     TextButton(onClick = { showThinking = !showThinking }) {
                         Text(
-                            if (showThinking) "Sembunyikan pemikiran" else "Lihat pemikiran (${item.reasonings.size})",
+                            if (showThinking) I18n.s.showThinking else I18n.s.thinkingCount(item.reasonings.size),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -604,7 +604,7 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                         copied = true
                     }) {
                         Text(
-                            if (copied) "Disalin ✓" else "Salin",
+                            if (copied) I18n.s.copied else I18n.s.copy,
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -641,7 +641,7 @@ private fun ApprovalSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                "Persetujuan tool (${pending.size})",
+                I18n.s.approvalTitle(pending.size),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
@@ -660,10 +660,10 @@ private fun ApprovalSheet(
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { onReply(req, "reject") }) {
-                                Text("Tolak", color = MaterialTheme.colorScheme.error)
+                                Text(I18n.s.reject, color = MaterialTheme.colorScheme.error)
                             }
-                            TextButton(onClick = { onReply(req, "once") }) { Text("Izinkan") }
-                            TextButton(onClick = { onReply(req, "always") }) { Text("Selalu") }
+                            TextButton(onClick = { onReply(req, "once") }) { Text(I18n.s.allow) }
+                            TextButton(onClick = { onReply(req, "always") }) { Text(I18n.s.always) }
                         }
                     }
                 }
@@ -689,12 +689,12 @@ private fun AgentSheet(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "Agent",
+                I18n.s.agentTitle,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             if (agents.isEmpty()) {
-                Text("Tidak ada agent.", style = MaterialTheme.typography.bodyMedium)
+                Text(I18n.s.noAgents, style = MaterialTheme.typography.bodyMedium)
             }
             agents.forEach { a ->
                 Card(
@@ -712,15 +712,15 @@ private fun AgentSheet(
                         Column(Modifier.weight(1f)) {
                             Text(a.id, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
                             Text(
-                                a.description.ifBlank { "mode: ${a.mode}" },
+                                a.description.ifBlank { I18n.s.modeFmt(a.mode) },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (a.id == current) {
-                            Text("aktif", style = MaterialTheme.typography.labelSmall)
+                            Text(I18n.s.active, style = MaterialTheme.typography.labelSmall)
                         } else {
-                            TextButton(onClick = { onSelect(a.id) }) { Text("Pilih") }
+                            TextButton(onClick = { onSelect(a.id) }) { Text(I18n.s.pick) }
                         }
                     }
                 }
@@ -745,12 +745,12 @@ private fun CommandSheet(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "Perintah",
+                I18n.s.commandsTitle,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             if (commands.isEmpty()) {
-                Text("Tidak ada perintah.", style = MaterialTheme.typography.bodyMedium)
+                Text(I18n.s.noCommands, style = MaterialTheme.typography.bodyMedium)
             }
             commands.forEach { c ->
                 Card(
@@ -775,7 +775,7 @@ private fun CommandSheet(
                                 )
                             }
                         }
-                        TextButton(onClick = { onPick(c.name) }) { Text("Pakai") }
+                        TextButton(onClick = { onPick(c.name) }) { Text(I18n.s.use) }
                     }
                 }
             }
@@ -800,18 +800,18 @@ private fun RevertSheet(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "Revert ke pesan ${state.messageID.take(8)}",
+                I18n.s.revertToMessage(state.messageID),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             if (state.files.isEmpty()) {
                 Text(
-                    "Tidak ada berkas yang berubah pada langkah ini.",
+                    I18n.s.noFilesChanged,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
                 Text(
-                    "${state.files.size} berkas akan dikembalikan:",
+                    I18n.s.filesWillRevert(state.files.size),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -858,9 +858,9 @@ private fun RevertSheet(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Batalkan") }
+                TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text(I18n.s.cancelBtn) }
                 TextButton(onClick = onApply, modifier = Modifier.weight(1f)) {
-                    Text("Terapkan revert", color = MaterialTheme.colorScheme.error)
+                    Text(I18n.s.applyRevert, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
