@@ -370,6 +370,7 @@ class EngineManager(private val context: Context) {
             if (!v.isNullOrBlank()) names.forEach { out[it] = v }
         }
         put(listOf("OPENAI_API_KEY"), "openai")
+        put(listOf("OPENCODE_API_KEY"), "opencode")
         put(listOf("ANTHROPIC_API_KEY"), "anthropic")
         put(listOf("GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY"), "google")
         put(listOf("GROQ_API_KEY"), "groq")

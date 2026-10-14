@@ -15,13 +15,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -380,7 +386,7 @@ private fun ReadyScreen(
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Sesi (${sessions?.size ?: "…"})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onOpenProviders) { Text("AI") }
+
 
             OutlinedButton(
                 onClick = {
@@ -433,6 +439,20 @@ private fun ReadyScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
+        NavigationBar {
+            NavigationBarItem(
+                selected = true,
+                onClick = {},
+                icon = { Icon(Icons.Default.List, contentDescription = null) },
+                label = { Text("Sesi") },
+            )
+            NavigationBarItem(
+                selected = false,
+                onClick = onOpenProviders,
+                icon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
+                label = { Text("AI") },
+            )
+        }
     }
 
     renameTarget?.let { target ->

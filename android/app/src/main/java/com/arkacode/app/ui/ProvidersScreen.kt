@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -53,6 +56,7 @@ import kotlinx.coroutines.withContext
 /** Nama env yang dibaca opencode per provider (sama dengan EngineManager). */
 private val ENV_HINTS = mapOf(
     "openai" to listOf("OPENAI_API_KEY"),
+    "opencode" to listOf("OPENCODE_API_KEY"),
     "anthropic" to listOf("ANTHROPIC_API_KEY"),
     "google" to listOf("GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY"),
     "groq" to listOf("GROQ_API_KEY"),
@@ -114,6 +118,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBars)
                         .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -140,7 +145,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             ) {
                 Text(
-                    "Isi API key per provider — tersimpan terenkripsi di HP dan disuntik otomatis tiap server nyala. Berlaku setelah Stop → Start ulang. Model gratis Zen butuh login via CLI/TUI di mesin lain untuk saat ini.",
+                    "Isi API key per provider — tersimpan terenkripsi di HP dan disuntik otomatis tiap server nyala. Berlaku setelah Stop → Start ulang. Model gratis Zen: daftar di opencode.ai/auth (boleh lewat browser HP), buat API key, tempel di provider OpenCode di bawah.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(12.dp),
                 )
