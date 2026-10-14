@@ -1,24 +1,38 @@
 package com.arkacode.app.net
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Credentials
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
 
 data class ServerHealth(val healthy: Boolean, val version: String)
-data class SessionInfo(val id: String, val title: String)
 
 /**
- * Klien HTTP minimal untuk `opencode serve` (F0: health + GET mentah).
- * Auth: HTTP basic (username default "opencode", password dari env server).
+ * Klien HTTP untuk `opencode serve` v1.19 (`/api/...`, skema dari tag sumber).
+ * Semua panggilan cancellable (Stop/abort benar-benar memutus HTTP).
+ * Parsing longgar: field tak dikenal diabaikan, bentuk tak dikenal → dilewati.
  */
 class OpenCodeClient(
     port: Int = 4096,
@@ -32,50 +46,228 @@ class OpenCodeClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /** Client sabar untuk long-poll `wait` (idle bisa makan waktu menit). */
+    private val longClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.MINUTES)
+        .build()
+
     private fun authHeader(): String = Credentials.basic(username, password)
 
-    suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
-        val req = Request.Builder()
-            .url("$baseUrl/global/health")
+    // ------------------------------------------------------------- transport
+
+    private suspend fun call(req: Request, useLongTimeout: Boolean = false): JsonElement =
+        suspendCancellableCoroutine { cont ->
+            val call = (if (useLongTimeout) longClient else client).newCall(req)
+            cont.invokeOnCancellation { runCatching { call.cancel() } }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use { resp ->
+                        val text = resp.body?.string() ?: ""
+                        if (!cont.isActive) return
+                        if (!resp.isSuccessful) {
+                            cont.resumeWithException(
+                                IllegalStateException("HTTP ${resp.code}: ${text.take(300)}"),
+                            )
+                            return
+                        }
+                        val el = runCatching { json.parseToJsonElement(text) }
+                            .getOrElse { JsonPrimitive(text) }
+                        cont.resume(el) {}
+                    }
+                }
+            })
+        }
+
+    private fun getReq(path: String): Request = Request.Builder()
+        .url(baseUrl + path)
+        .header("Authorization", authHeader())
+        .build()
+
+    private fun postReq(path: String, bodyJson: String?): Request {
+        val body = (bodyJson ?: "").toRequestBody("application/json".toMediaType())
+        return Request.Builder()
+            .url(baseUrl + path)
             .header("Authorization", authHeader())
+            .post(body)
             .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IllegalStateException("Server menjawab HTTP ${resp.code}")
-            val obj = json.parseToJsonElement(resp.body?.string() ?: "").jsonObject
-            ServerHealth(
-                healthy = obj["healthy"]?.jsonPrimitive?.booleanOrNull == true,
-                version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "?",
+    }
+
+    // ------------------------------------------------------------- helpers
+
+    private fun JsonObject.str(key: String): String? =
+        (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject.arr(key: String): JsonArray =
+        (this[key] as? kotlinx.serialization.json.JsonArray) ?: JsonArray(emptyList())
+
+    private fun JsonObject.obj(key: String): JsonObject =
+        (this[key] as? JsonObject) ?: JsonObject(emptyMap())
+
+    /** Ambil array `data`, toleran bila server mengembalikan array telanjang. */
+    private fun JsonElement.dataArray(): JsonArray = when (this) {
+        is JsonObject -> arr("data")
+        is JsonArray -> this
+        else -> JsonArray(emptyList())
+    }
+
+    // ------------------------------------------------------------- endpoints
+
+    suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
+        val el = call(getReq("/global/health"))
+        val o = el as? JsonObject ?: JsonObject(emptyMap())
+        ServerHealth(
+            healthy = o["healthy"]?.jsonPrimitive?.booleanOrNull == true,
+            version = o.str("version") ?: "?",
+        )
+    }
+
+    /** GET mentah untuk debug. */
+    suspend fun get(path: String): String = withContext(Dispatchers.IO) {
+        val el = call(getReq(path))
+        el.toString()
+    }
+
+    suspend fun listSessions(limit: Int = 50): List<ChatSession> = withContext(Dispatchers.IO) {
+        val el = call(getReq("/api/session?limit=$limit&order=desc"))
+        el.dataArray().mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id") ?: return@mapNotNull null
+            val model = o.obj("model")
+            ChatSession(
+                id = id,
+                title = o.str("title") ?: "",
+                providerID = model.str("providerID"),
+                modelID = model.str("id"),
             )
         }
     }
 
-    /** Daftar sesi di server (id + judul, parsing longgar). */
-    suspend fun listSessions(): List<SessionInfo> = withContext(Dispatchers.IO) {
-        val req = Request.Builder()
-            .url("$baseUrl/session")
-            .header("Authorization", authHeader())
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-            runCatching {
-                json.parseToJsonElement(resp.body?.string() ?: "").jsonArray.mapNotNull { el ->
-                    val o = el.jsonObject
-                    val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    SessionInfo(id, o["title"]?.jsonPrimitive?.contentOrNull ?: "")
+    suspend fun createSession(): ChatSession = withContext(Dispatchers.IO) {
+        val el = call(postReq("/api/session", "{}"))
+        val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
+        val id = o.str("id") ?: throw IllegalStateException("Server tidak mengembalikan id sesi")
+        ChatSession(id = id, title = o.str("title") ?: "")
+    }
+
+    suspend fun listMessages(sessionId: String, limit: Int = 200): List<ChatItem> =
+        withContext(Dispatchers.IO) {
+            val el = call(getReq("/api/session/$sessionId/message?limit=$limit&order=asc"))
+            el.dataArray().mapNotNull { item -> parseMessage(item) }
+        }
+
+    private fun parseMessage(item: JsonElement): ChatItem? {
+        val o = item as? JsonObject ?: return null
+        val id = o.str("id") ?: return null
+        return when (o.str("type")) {
+            "user" -> {
+                val files = o.arr("files").size
+                val text = o.str("text") ?: ""
+                if (text.isBlank() && files == 0) null
+                else ChatItem.User(id, text, files)
+            }
+            "assistant" -> {
+                val texts = mutableListOf<String>()
+                val reasonings = mutableListOf<String>()
+                val tools = mutableListOf<ToolUse>()
+                for (part in o.arr("content")) {
+                    val p = part as? JsonObject ?: continue
+                    when (p.str("type")) {
+                        "text" -> p.str("text")?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
+                        "reasoning" -> p.str("text")?.takeIf { it.isNotBlank() }?.let { reasonings.add(it) }
+                        "tool" -> {
+                            val st = p.obj("state").str("status") ?: ""
+                            tools.add(ToolUse(p.str("id") ?: "", p.str("name") ?: "tool", st))
+                        }
+                    }
                 }
-            }.getOrDefault(emptyList())
+                if (texts.isEmpty() && reasonings.isEmpty() && tools.isEmpty()) null
+                else ChatItem.Assistant(id, texts, reasonings, tools)
+            }
+            "synthetic", "system" -> {
+                val text = o.str("text") ?: o.str("description") ?: return null
+                if (text.isBlank()) null else ChatItem.Note(id, text)
+            }
+            else -> null
         }
     }
 
-    /** GET mentah untuk eksplorasi endpoint dari layar debug. */
-    suspend fun get(path: String): String = withContext(Dispatchers.IO) {
-        val req = Request.Builder()
-            .url(baseUrl + path)
-            .header("Authorization", authHeader())
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code} untuk $path")
-            resp.body?.string() ?: ""
+    /** Kirim pesan (async di server — return saat admit, bukan saat selesai). */
+    suspend fun sendPrompt(sessionId: String, text: String): String = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("prompt", buildJsonObject { put("text", text) }) }
+        val el = call(postReq("/api/session/$sessionId/prompt", body.toString()))
+        val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
+        o.str("id") ?: ""
+    }
+
+    /** Tunggu loop agent idle (long-poll; cancel = Stop). */
+    suspend fun waitIdle(sessionId: String) {
+        call(postReq("/api/session/$sessionId/wait", null), useLongTimeout = true)
+    }
+
+    /** Hentikan turn yang jalan. */
+    suspend fun interrupt(sessionId: String) {
+        runCatching { call(postReq("/api/session/$sessionId/interrupt", null)) }
+    }
+
+    suspend fun listPermissions(sessionId: String): List<PermissionReq> =
+        withContext(Dispatchers.IO) {
+            val el = runCatching { call(getReq("/api/session/$sessionId/permission")) }
+                .getOrNull() ?: return@withContext emptyList()
+            val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
+            data.mapNotNull { item ->
+                val o = item as? JsonObject ?: return@mapNotNull null
+                val id = o.str("id") ?: return@mapNotNull null
+                val summary = buildString {
+                    o.str("action")?.let { append(it) }
+                    o.str("tool")?.let { if (isNotEmpty()) append(" ") else Unit; append(it) }
+                    val rest = o.entries
+                        .filter { (k, v) -> k != "id" && v.toString().length < 200 }
+                        .joinToString(" ") { (k, v) -> "$k=${v.toString().trim('\"').take(80)}" }
+                    if (rest.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(rest.take(280))
+                    }
+                }.ifBlank { "Permintaan persetujuan" }
+                PermissionReq(id, summary)
+            }
+        }
+
+    /** reply: "once" | "always" | "reject" (always = allow-all bawaan opencode). */
+    suspend fun replyPermission(sessionId: String, requestId: String, reply: String) {
+        val body = buildJsonObject { put("reply", reply) }
+        call(postReq("/api/session/$sessionId/permission/$requestId/reply", body.toString()))
+    }
+
+    /** Ganti model sesi (server-side; pengganti pin model Arka). */
+    suspend fun switchModel(sessionId: String, providerID: String, modelID: String) {
+        val body = buildJsonObject {
+            put("model", buildJsonObject {
+                put("id", modelID)
+                put("providerID", providerID)
+            })
+        }
+        call(postReq("/api/session/$sessionId/model", body.toString()))
+    }
+
+    suspend fun listProviders(): List<ProviderInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/provider")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() }
+            ?: (el as? JsonArray) ?: return@withContext emptyList()
+        arr.mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id") ?: o.str("name") ?: return@mapNotNull null
+            val models = o.arr("models").mapNotNull { m ->
+                val mo = m as? JsonObject ?: return@mapNotNull null
+                val mid = mo.str("id") ?: mo.str("name") ?: return@mapNotNull null
+                ModelInfo(mid, mo.str("name") ?: mid)
+            }
+            ProviderInfo(id, o.str("name") ?: id, models)
         }
     }
 }

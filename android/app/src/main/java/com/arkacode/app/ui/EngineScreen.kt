@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
 import com.arkacode.app.net.OpenCodeClient
-import com.arkacode.app.net.SessionInfo
+import com.arkacode.app.net.ChatSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +66,7 @@ fun EngineScreen() {
     val port = EngineConfig.DEFAULT_PORT
 
     var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
+    var chatTarget by remember { mutableStateOf<ChatSession?>(null) }
     var lines by remember { mutableStateOf(listOf<String>()) }
     var failMsg by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
@@ -148,16 +150,33 @@ fun EngineScreen() {
                 },
             )
         }
-        is Screen.Ready -> ReadyScreen(
-            version = s.version,
-            port = port,
-            engine = engine,
-            onStop = {
-                engine.stopServer()
-                lines = lines + "[${stamp()}] server dihentikan."
-                screen = Screen.Stopped
-            },
-        )
+        is Screen.Ready -> {
+            val target = chatTarget
+            if (target != null) {
+                ChatScreen(
+                    sessionId = target.id,
+                    sessionTitle = target.title,
+                    port = port,
+                    password = DEFAULT_PASSWORD,
+                    initialProviderID = target.providerID,
+                    initialModelID = target.modelID,
+                    onBack = { chatTarget = null },
+                )
+            } else {
+                ReadyScreen(
+                    version = s.version,
+                    port = port,
+                    engine = engine,
+                    onStop = {
+                        engine.stopServer()
+                        lines = lines + "[${stamp()}] server dihentikan."
+                        screen = Screen.Stopped
+                    },
+                    onOpenChat = { chatTarget = it },
+                    onNewSession = { chatTarget = it },
+                )
+            }
+        }
         Screen.Stopped -> {
             val listState = rememberLazyListState()
             LaunchedEffect(lines.size) {
@@ -246,10 +265,13 @@ private fun ReadyScreen(
     port: Int,
     engine: EngineManager,
     onStop: () -> Unit,
+    onOpenChat: (ChatSession) -> Unit,
+    onNewSession: (ChatSession) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var sessions by remember { mutableStateOf<List<SessionInfo>?>(null) }
+    var sessions by remember { mutableStateOf<List<ChatSession>?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
 
     fun load() {
         loading = true
@@ -283,6 +305,21 @@ private fun ReadyScreen(
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Sesi (${sessions?.size ?: "…"})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            OutlinedButton(
+                onClick = {
+                    creating = true
+                    scope.launch {
+                        val created = runCatching {
+                            withContext(Dispatchers.IO) {
+                                OpenCodeClient(port = port, password = DEFAULT_PASSWORD).createSession()
+                            }
+                        }.getOrNull()
+                        creating = false
+                        if (created != null) onNewSession(created) else load()
+                    }
+                },
+                enabled = !loading && !creating,
+            ) { Text("+ Sesi") }
             OutlinedButton(onClick = { load() }, enabled = !loading) { Text("Muat ulang") }
         }
         val list = sessions
@@ -290,13 +327,16 @@ private fun ReadyScreen(
             Text(if (loading) "memuat…" else "gagal memuat sesi.", style = MaterialTheme.typography.bodyMedium)
         } else if (list.isEmpty()) {
             Text(
-                "Belum ada sesi. Chat menyusul di F1 — untuk sekarang kelola sesi dari TUI/CLI bila perlu.",
+                "Belum ada sesi. Ketuk + Sesi untuk mulai chat.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 list.take(50).forEach { s ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        modifier = Modifier.clickable { onOpenChat(s) },
+                    ) {
                         Column(Modifier.padding(10.dp)) {
                             Text(s.title.ifBlank { "(tanpa judul)" }, fontWeight = FontWeight.SemiBold)
                             Text(s.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
