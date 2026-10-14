@@ -72,7 +72,20 @@ fun EngineScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember { EngineManager(context) }
-    val port = EngineConfig.DEFAULT_PORT
+    var port by remember { mutableStateOf(EngineConfig.DEFAULT_PORT) }
+    var password by remember { mutableStateOf(DEFAULT_PASSWORD) }
+    var credsReady by remember { mutableStateOf(false) }
+
+    // Muat kredensial tersimpan (bila ada) sebelum pipeline jalan.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            runCatching { com.arkacode.app.core.SecureStore.load(context) }.getOrNull()
+        }?.let { (savedPort, savedPw) ->
+            port = savedPort
+            if (savedPw.isNotEmpty()) password = savedPw
+        }
+        credsReady = true
+    }
 
     var screen by remember { mutableStateOf<Screen>(Screen.Boot(0)) }
     var chatTarget by remember { mutableStateOf<ChatSession?>(null) }
@@ -94,7 +107,7 @@ fun EngineScreen(
             // 0. Server lama masih hidup? Langsung masuk.
             log("cek server lama di port $port…")
             val alive = runCatching {
-                OpenCodeClient(port = port, password = DEFAULT_PASSWORD).health()
+                OpenCodeClient(port = port, password = password).health()
             }.getOrNull()
             if (alive?.healthy == true) {
                 log("server sudah jalan v${alive.version}, langsung masuk.")
@@ -133,8 +146,8 @@ fun EngineScreen(
             }
             // 3. Start + health (termasuk pasang lib C++ sekali bila perlu)
             log("menyalakan server di port $port…")
-            engine.startServer(port, DEFAULT_PASSWORD).getOrThrow()
-            val h = OpenCodeClient(port = port, password = DEFAULT_PASSWORD).health()
+            engine.startServer(port, password).getOrThrow()
+            val h = OpenCodeClient(port = port, password = password).health()
             log("server jalan v${h.version}.")
             screen = Screen.Ready(h.version)
         } catch (e: Exception) {
@@ -148,7 +161,7 @@ fun EngineScreen(
 
     when (val s = screen) {
         is Screen.Boot -> {
-            LaunchedEffect(s.attempt) { pipeline() }
+            LaunchedEffect(s.attempt, credsReady) { if (credsReady) pipeline() }
             BootScreen(
                 lines = lines,
                 working = working,
@@ -166,7 +179,7 @@ fun EngineScreen(
                     sessionId = target.id,
                     sessionTitle = target.title,
                     port = port,
-                    password = DEFAULT_PASSWORD,
+                    password = password,
                     initialProviderID = target.providerID,
                     initialModelID = target.modelID,
                     onBack = { chatTarget = null },
@@ -201,10 +214,31 @@ fun EngineScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("Server dihentikan.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Button(
-                    onClick = { screen = Screen.Boot(0) },
+                OutlinedTextField(
+                    value = port.toString(),
+                    onValueChange = { port = it.filter(Char::isDigit).take(5).toIntOrNull() ?: port },
+                    label = { Text("Port") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Start lagi") }
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password server") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                runCatching { com.arkacode.app.core.SecureStore.save(context, port, password) }
+                            }
+                            screen = Screen.Boot(0)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Simpan & start lagi") }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -299,7 +333,7 @@ private fun ReadyScreen(
         scope.launch {
             sessions = runCatching {
                 withContext(Dispatchers.IO) {
-                    OpenCodeClient(port = port, password = DEFAULT_PASSWORD).listSessions()
+                    OpenCodeClient(port = port, password = password).listSessions()
                 }
             }.getOrNull()
             titles = runCatching { uiPrefs.titleOverrides() }.getOrDefault(titles)
@@ -342,7 +376,7 @@ private fun ReadyScreen(
                     scope.launch {
                         val created = runCatching {
                             withContext(Dispatchers.IO) {
-                                OpenCodeClient(port = port, password = DEFAULT_PASSWORD).createSession()
+                                OpenCodeClient(port = port, password = password).createSession()
                             }
                         }.getOrNull()
                         creating = false

@@ -98,21 +98,22 @@ Pola kerja tiap fase (warisan Arka): patch kecil → PR → CI build APK → mer
 | Baterai/thermal untuk turn panjang | Terbuka | `prompt_async` + notifikasi; stop selalu tersedia |
 | Secret (password server, auth.json) | Terkontrol | EncryptedSharedPreferences; tidak pernah di-log |
 
-## 8. Status implementasi (di `main`, per 2026-10-14)
+## 8. Status implementasi (di `main`, per 2026-10-14; batch F4: backup+rilis+kredensial+SSE)
 
 Sudah:
 - F0: skeleton Gradle+CI, proot Alpine, ServerManager (unduh v1.19.0 musl+sha256, `serve` + tunggu health, stop, serve.log), OpenCodeClient (basic-auth, health, GET mentah).
 - Diagnostik engine: tes exec terisolasi, info asset/ABI, log tail di error, `apk libstdc++/libgcc` otomatis, password sampai ke guest env.
 - Auto-provisioning: buka app → pipeline jalan sendiri di layar log → selesai masuk frontend sesi (deteksi server lama, retry, stop/start lagi).
 - F1 chat: kirim async, refresh near-live (poll 2 dtk), abort/interrupt, approval (Tolak/Izinkan/Selalu), salin pesan + blok kode + output tool, picker model per sesi (+ switch server-side), render markdown, thinking collapse, input aman keyboard.
-- Fondasi: backup_rules.xml + network config tersedia, CI debug hijau.
+- Fondasi: backup rules terpasang di manifest, CI debug + release hijau, password server terenkripsi (+editor port/password).
+- Event server (SSE) sebagai trigger refresh live; polling tetap jaring pengaman.
 
 Belum:
-- SSE event penuh (masih polling 2 dtk); `wait` dipakai sekali per turn.
-- Layar Providers/Auth (daftar + kunci/OAuth) dan config editor; password masih default in-memory.
+- SSE penuh dengan parsing semantik event (kini trigger mentah saja).
+- Layar Providers/Auth (daftar + kunci/OAuth) dan config editor.
 - Files UI (tree/baca/cari) — baru API mentah.
 - Agents/commands/MCP UI; diff/revert/share/summarize/compact/fork UI.
-- i18n/tema; backup rules belum dirujuk manifest; release CI; EncryptedSharedPreferences.
+- i18n; tema terang/gelap sudah.
 
 ## 7. Pertanyaan Terbuka (tidak menghalangi F0)
 
