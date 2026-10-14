@@ -61,3 +61,91 @@ data class PermissionReq(val id: String, val summary: String)
 
 /** Entri filesystem server (path relatif ke working dir). */
 data class FsEntry(val path: String, val isDir: Boolean)
+
+
+// ----------------------------------------------------- SSE events (semantik)
+
+/**
+ * Event semantik dari SSE `/api/event` (v1.19: `{type, data}`; toleran ke
+ * `properties` legacy). Dipakai ChatScreen untuk update inkremental tanpa
+ * selalu re-fetch.
+ */
+sealed interface ServerEvent {
+    val sessionID: String?
+
+    object Connected : ServerEvent {
+        override val sessionID: String? get() = null
+    }
+
+    /** Status sesi: `idle` | `busy` | `retry`. */
+    data class Status(override val sessionID: String?, val status: String, val message: String?) : ServerEvent
+
+    /** Potongan teks assistant (streaming). */
+    data class TextDelta(override val sessionID: String?, val messageID: String?, val delta: String) : ServerEvent
+
+    /** Teks assistant final (nilai penuh). */
+    data class TextEnded(override val sessionID: String?, val messageID: String?, val text: String) : ServerEvent
+
+    /** Potongan reasoning (streaming). */
+    data class ReasoningDelta(override val sessionID: String?, val messageID: String?, val delta: String) : ServerEvent
+
+    /** Perubahan status tool (label boleh kosong). */
+    data class Tool(override val sessionID: String?, val label: String, val status: String) : ServerEvent
+
+    /** Persetujuan muncul/selesai. */
+    data class Permission(override val sessionID: String?) : ServerEvent
+
+    /** Error sesi. */
+    data class Error(override val sessionID: String?, val message: String) : ServerEvent
+
+    /** Perubahan lain yang butuh refresh (pesan/part/diff/sesi). */
+    data class Other(override val sessionID: String?, val type: String) : ServerEvent
+}
+
+// ------------------------------------------------------------- integrations
+
+/** Satu opsi prompt select. */
+data class IntegrationOption(val label: String, val value: String, val hint: String?)
+
+/** Prompt input saat memulai OAuth. */
+data class IntegrationPrompt(
+    val type: String,
+    val key: String,
+    val message: String,
+    val placeholder: String?,
+    val options: List<IntegrationOption>,
+    val whenKey: String?,
+    val whenOp: String?,
+    val whenValue: String?,
+)
+
+/** Metode autentikasi integrasi (oauth|key|env). */
+data class IntegrationMethod(
+    val id: String?,
+    val type: String,
+    val label: String,
+    val prompts: List<IntegrationPrompt>,
+    val envNames: List<String>,
+)
+
+/** Koneksi integrasi yang sudah ada (credential|env). */
+data class IntegrationConnection(
+    val type: String,
+    val id: String?,
+    val label: String?,
+    val envName: String?,
+)
+
+/** Integrasi + metode & koneksi. */
+data class IntegrationInfo(
+    val id: String,
+    val name: String,
+    val methods: List<IntegrationMethod>,
+    val connections: List<IntegrationConnection>,
+)
+
+/** Attempt OAuth yang baru dimulai. */
+data class OAuthAttempt(val attemptID: String, val url: String, val instructions: String, val mode: String)
+
+/** Status attempt OAuth. */
+data class OAuthStatus(val status: String, val message: String?)

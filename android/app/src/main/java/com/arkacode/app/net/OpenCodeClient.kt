@@ -194,11 +194,12 @@ class OpenCodeClient(
     }
 
     /**
-     * Aliran event server (SSE `/api/event`) — trigger mentah untuk refresh.
-     * Berhenti saat collector dibatalkan; error koneksi mengakhiri diam-diam
-     * (polling 2 dtk tetap jadi jaring pengaman).
+     * Aliran event server (SSE `/api/event`) di-parse jadi [ServerEvent]
+     * semantik. Berhenti saat collector dibatalkan; error koneksi mengakhiri
+     * diam-diam (polling 2 dtk tetap jadi jaring pengaman). Parsing longgar:
+     * bentuk tak dikenal → [ServerEvent.Other].
      */
-    fun serverEvents(): Flow<String> = callbackFlow {
+    fun serverEvents(): Flow<ServerEvent> = callbackFlow {
         val req = Request.Builder()
             .url(baseUrl + "/api/event")
             .header("Authorization", authHeader())
@@ -218,20 +219,18 @@ class OpenCodeClient(
                 return@callbackFlow
             }
             try {
-                var eventName = ""
                 val data = StringBuilder()
                 while (true) {
                     val line = reader.readLine() ?: break
                     when {
                         line.isBlank() -> {
                             if (data.isNotEmpty()) {
-                                trySend(eventName.ifBlank { "message" } + " " + data.toString().take(160))
+                                parseServerEvent(data.toString())?.let { trySend(it) }
                             }
-                            eventName = ""
                             data.clear()
                         }
                         line.startsWith(":") -> {}
-                        line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
+                        line.startsWith("event:") -> {}
                         line.startsWith("data:") -> {
                             if (data.isNotEmpty()) data.append("\n")
                             data.append(line.removePrefix("data:").trim())
@@ -246,6 +245,57 @@ class OpenCodeClient(
         }
         awaitClose { runCatching { call.cancel() } }
     }.flowOn(Dispatchers.IO)
+
+    /** Parse satu payload JSON SSE → [ServerEvent] (V2 `data`, fallback `properties`). */
+    private fun parseServerEvent(raw: String): ServerEvent? {
+        val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        val type = root.str("type") ?: return null
+        val payload = (root["data"] as? JsonObject)
+            ?: (root["properties"] as? JsonObject)
+            ?: JsonObject(emptyMap())
+        val sid = payload.str("sessionID")
+        return when (type) {
+            "server.connected" -> ServerEvent.Connected
+            "session.status" -> {
+                val st = payload.obj("status")
+                ServerEvent.Status(sid, st.str("type") ?: "busy", st.str("message"))
+            }
+            "session.idle" -> ServerEvent.Status(sid, "idle", null)
+            "session.execution.started" -> ServerEvent.Status(sid, "busy", null)
+            "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted" ->
+                ServerEvent.Status(sid, "idle", null)
+            "session.text.delta" ->
+                ServerEvent.TextDelta(sid, payload.str("assistantMessageID"), payload.str("delta") ?: "")
+            "session.text.ended" ->
+                ServerEvent.TextEnded(sid, payload.str("assistantMessageID"), payload.str("text") ?: "")
+            "session.reasoning.delta" ->
+                ServerEvent.ReasoningDelta(sid, payload.str("assistantMessageID"), payload.str("delta") ?: "")
+            "message.part.delta" -> when (payload.str("field")) {
+                "text" -> ServerEvent.TextDelta(sid, payload.str("messageID"), payload.str("delta") ?: "")
+                "reasoning" -> ServerEvent.ReasoningDelta(sid, payload.str("messageID"), payload.str("delta") ?: "")
+                else -> ServerEvent.Other(sid, type)
+            }
+            "message.part.updated" -> {
+                val part = payload.obj("part")
+                when (part.str("type")) {
+                    "text" -> ServerEvent.TextEnded(sid, part.str("messageID"), part.str("text") ?: "")
+                    "tool" -> ServerEvent.Tool(sid, part.str("tool") ?: "", part.obj("state").str("status") ?: "")
+                    else -> ServerEvent.Other(sid, type)
+                }
+            }
+            "session.tool.input.started" -> ServerEvent.Tool(sid, payload.str("name") ?: "", "running")
+            "session.tool.called" -> ServerEvent.Tool(sid, "", "running")
+            "session.tool.success" -> ServerEvent.Tool(sid, "", "completed")
+            "session.tool.failed" -> ServerEvent.Tool(sid, "", "error")
+            "permission.asked", "permission.v2.asked", "permission.replied", "permission.v2.replied" ->
+                ServerEvent.Permission(sid)
+            "session.error" -> ServerEvent.Error(
+                sid,
+                payload.obj("error").str("message") ?: payload.str("error") ?: "error",
+            )
+            else -> ServerEvent.Other(sid, type)
+        }
+    }
 
     /** GET mentah untuk debug. */
     suspend fun get(path: String): String = withContext(Dispatchers.IO) {
@@ -504,5 +554,140 @@ class OpenCodeClient(
     /** Terapkan revert yang distage (kembalikan berkas ke snapshot). */
     suspend fun commitRevert(sessionId: String) {
         call(postReq("/api/session/$sessionId/revert/commit", null))
+    }
+
+    // ---------------------------------------------------------- integrations
+
+    private fun parseIntegration(item: JsonElement): IntegrationInfo? {
+        val o = item as? JsonObject ?: return null
+        val id = o.str("id") ?: return null
+        val methods = o.arr("methods").mapNotNull { m ->
+            val mo = m as? JsonObject ?: return@mapNotNull null
+            val mtype = mo.str("type") ?: return@mapNotNull null
+            val prompts = mo.arr("prompts").mapNotNull { p ->
+                val po = p as? JsonObject ?: return@mapNotNull null
+                val pkey = po.str("key") ?: return@mapNotNull null
+                val wh = po.obj("when")
+                IntegrationPrompt(
+                    type = po.str("type") ?: "text",
+                    key = pkey,
+                    message = po.str("message") ?: pkey,
+                    placeholder = po.str("placeholder"),
+                    options = po.arr("options").mapNotNull { op ->
+                        val oo = op as? JsonObject ?: return@mapNotNull null
+                        val v = oo.str("value") ?: return@mapNotNull null
+                        IntegrationOption(oo.str("label") ?: v, v, oo.str("hint"))
+                    },
+                    whenKey = wh.str("key"),
+                    whenOp = wh.str("op"),
+                    whenValue = wh.str("value"),
+                )
+            }
+            IntegrationMethod(
+                id = mo.str("id"),
+                type = mtype,
+                label = mo.str("label") ?: mtype,
+                prompts = prompts,
+                envNames = mo.arr("names").mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+            )
+        }
+        val connections = o.arr("connections").mapNotNull { c ->
+            val co = c as? JsonObject ?: return@mapNotNull null
+            IntegrationConnection(
+                type = co.str("type") ?: "",
+                id = co.str("id"),
+                label = co.str("label"),
+                envName = co.str("name"),
+            )
+        }
+        return IntegrationInfo(id, o.str("name") ?: id, methods, connections)
+    }
+
+    /** Integrasi & metode autentikasinya. */
+    suspend fun listIntegrations(): List<IntegrationInfo> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/integration")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val arr = (el as? JsonObject)?.let { it.dataArray() } ?: (el as? JsonArray)
+            ?: return@withContext emptyList()
+        arr.mapNotNull { parseIntegration(it) }
+    }
+
+    suspend fun getIntegration(id: String): IntegrationInfo? = withContext(Dispatchers.IO) {
+        val el = runCatching {
+            call(getReq("/api/integration/" + java.net.URLEncoder.encode(id, "UTF-8")))
+        }.getOrNull() ?: return@withContext null
+        val o = (el as? JsonObject)?.obj("data") ?: el as? JsonObject ?: return@withContext null
+        parseIntegration(o)
+    }
+
+    /** Hubungkan integrasi memakai API key. */
+    suspend fun connectIntegrationKey(integrationId: String, key: String, label: String? = null) {
+        val body = buildJsonObject {
+            put("key", key)
+            if (label != null) put("label", label)
+        }
+        call(
+            postReq(
+                "/api/integration/" + java.net.URLEncoder.encode(integrationId, "UTF-8") + "/connect/key",
+                body.toString(),
+            ),
+        )
+    }
+
+    /** Mulai OAuth; balikkan URL otorisasi + instruksi. */
+    suspend fun beginOAuth(
+        integrationId: String,
+        methodID: String,
+        inputs: Map<String, String>,
+        label: String? = null,
+    ): OAuthAttempt = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("methodID", methodID)
+            put("inputs", buildJsonObject { inputs.forEach { (k, v) -> put(k, v) } })
+            if (label != null) put("label", label)
+        }
+        val el = call(
+            postReq(
+                "/api/integration/" + java.net.URLEncoder.encode(integrationId, "UTF-8") + "/connect/oauth",
+                body.toString(),
+            ),
+        )
+        val o = (el as? JsonObject)?.obj("data") ?: (el as? JsonObject) ?: JsonObject(emptyMap())
+        OAuthAttempt(
+            attemptID = o.str("attemptID") ?: "",
+            url = o.str("url") ?: "",
+            instructions = o.str("instructions") ?: "",
+            mode = o.str("mode") ?: "auto",
+        )
+    }
+
+    suspend fun oauthStatus(attemptID: String): OAuthStatus = withContext(Dispatchers.IO) {
+        val el = runCatching {
+            call(getReq("/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8")))
+        }.getOrNull() ?: return@withContext OAuthStatus("failed", null)
+        val o = (el as? JsonObject)?.obj("data") ?: (el as? JsonObject) ?: JsonObject(emptyMap())
+        OAuthStatus(o.str("status") ?: "pending", o.str("message"))
+    }
+
+    suspend fun completeOAuth(attemptID: String, code: String?) {
+        val body = buildJsonObject { if (!code.isNullOrBlank()) put("code", code) }
+        call(
+            postReq(
+                "/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8") + "/complete",
+                body.toString(),
+            ),
+        )
+    }
+
+    suspend fun cancelOAuth(attemptID: String) {
+        runCatching {
+            call(
+                Request.Builder()
+                    .url(baseUrl + "/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8"))
+                    .header("Authorization", authHeader())
+                    .delete()
+                    .build(),
+            )
+        }
     }
 }

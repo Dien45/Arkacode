@@ -69,6 +69,7 @@ import com.arkacode.app.net.ModelRef
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
 import com.arkacode.app.net.RevertState
+import com.arkacode.app.net.ServerEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -112,10 +113,22 @@ fun ChatScreen(
     var showCommands by remember { mutableStateOf(false) }
     var revert by remember { mutableStateOf<RevertState?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var liveText by remember { mutableStateOf("") }
+    var liveReasoning by remember { mutableStateOf("") }
+    var toolLabel by remember { mutableStateOf<String?>(null) }
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
 
     suspend fun refreshAll() {
         messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
         pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+    }
+
+    fun scheduleRefresh(delayMs: Long = 350L) {
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(delayMs)
+            refreshAll()
+        }
     }
 
     fun stopAll() {
@@ -127,6 +140,9 @@ fun ChatScreen(
             busy = false
         }
         busy = false
+        liveText = ""
+        liveReasoning = ""
+        toolLabel = null
     }
 
     fun send(text: String) {
@@ -135,6 +151,9 @@ fun ChatScreen(
         error = null
         busy = true
         input = ""
+        liveText = ""
+        liveReasoning = ""
+        toolLabel = null
         pollJob?.cancel()
         waitJob?.cancel()
         pollJob = scope.launch {
@@ -195,13 +214,43 @@ fun ChatScreen(
             messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
         }
     }
-    // Event server sebagai trigger refresh live; polling 2 dtk tetap jaring pengaman.
+    // Event server (SSE semantik) untuk update live; polling 2 dtk tetap jaring pengaman.
     LaunchedEffect(busy, sessionId) {
         if (!busy) return@LaunchedEffect
         try {
-            client.serverEvents().collect {
-                messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
-                pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+            client.serverEvents().collect { ev ->
+                if (ev.sessionID != null && ev.sessionID != sessionId) return@collect
+                when (ev) {
+                    is ServerEvent.Connected -> {}
+                    is ServerEvent.Status -> when (ev.status) {
+                        "idle" -> {
+                            busy = false
+                            liveText = ""
+                            liveReasoning = ""
+                            toolLabel = null
+                            refreshAll()
+                        }
+                        "retry" -> error = ev.message
+                        else -> {}
+                    }
+                    is ServerEvent.TextDelta -> {
+                        liveText += ev.delta
+                        scheduleRefresh(600L)
+                    }
+                    is ServerEvent.TextEnded -> {
+                        if (ev.text.isNotBlank()) liveText = ev.text
+                    }
+                    is ServerEvent.ReasoningDelta -> liveReasoning += ev.delta
+                    is ServerEvent.Tool -> {
+                        if (ev.label.isNotBlank()) toolLabel = ev.label
+                        scheduleRefresh(400L)
+                    }
+                    is ServerEvent.Permission -> {
+                        pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+                    }
+                    is ServerEvent.Error -> error = ev.message
+                    is ServerEvent.Other -> scheduleRefresh(400L)
+                }
             }
         } catch (e: Exception) {
         }
@@ -315,9 +364,26 @@ fun ChatScreen(
                 }
                 if (busy) {
                     item("typing") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.padding(8.dp))
-                            Text(I18n.s.working, style = MaterialTheme.typography.bodySmall)
+                        val lastAssistant = messages.filterIsInstance<ChatItem.Assistant>().lastOrNull()
+                        val shownByMessages = liveText.isNotBlank() &&
+                            lastAssistant?.texts?.joinToString("\n")?.trimEnd()?.endsWith(liveText.trim()) == true
+                        if (liveText.isNotBlank() && !shownByMessages) {
+                            AssistantBubble(
+                                ChatItem.Assistant(
+                                    id = "__live__",
+                                    texts = listOf(liveText),
+                                    reasonings = listOf(liveReasoning).filter { it.isNotBlank() },
+                                    tools = emptyList(),
+                                ),
+                            )
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.padding(8.dp))
+                                Text(
+                                    toolLabel?.let { I18n.s.runningTool(it) } ?: I18n.s.working,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     }
                 }

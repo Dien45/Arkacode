@@ -86,6 +86,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var showIntegrations by remember { mutableStateOf(false) }
 
     fun load() {
         loading = true
@@ -149,6 +150,34 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(12.dp),
                 )
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp)),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { showIntegrations = true }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            I18n.s.integrationsTitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            I18n.s.integrationsOpen,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("›")
+                }
             }
             error?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -275,5 +304,9 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
         }
+    }
+
+    if (showIntegrations) {
+        IntegrationsSheet(port = port, password = password, onDismiss = { showIntegrations = false })
     }
 }
