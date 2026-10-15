@@ -104,7 +104,6 @@ fun ChatScreen(
     var pinnedModel by remember { mutableStateOf<ModelRef?>(null) }
     var showPicker by remember { mutableStateOf(false) }
     var pollJob by remember { mutableStateOf<Job?>(null) }
-    var waitJob by remember { mutableStateOf<Job?>(null) }
     var showFilesTab by remember { mutableStateOf(false) }
     var agents by remember { mutableStateOf(listOf<AgentInfo>()) }
     var agentId by remember { mutableStateOf<String?>(null) }
@@ -134,7 +133,6 @@ fun ChatScreen(
 
     fun stopAll() {
         pollJob?.cancel()
-        waitJob?.cancel()
         scope.launch {
             client.interrupt(sessionId)
             refreshAll()
@@ -158,47 +156,37 @@ fun ChatScreen(
         liveReasoning = ""
         toolLabel = null
         pollJob?.cancel()
-        waitJob?.cancel()
-        val preCount = messages.size
+        // Server v1.19 tidak punya `session.wait` (503) dan tidak mengirim
+        // event idle → penyelesaian turn dideteksi dari `finish` pesan assistant.
+        val preIds = messages.map { it.id }.toSet()
         pollJob = scope.launch {
             try {
                 pinnedModel?.let { m ->
                     runCatching { client.switchModel(sessionId, m.providerID, m.id) }
                 }
                 client.sendPrompt(sessionId, trimmed)
+                var waited = 0L
                 while (true) {
-                    messages = client.listMessages(sessionId)
-                    pending = client.listPermissions(sessionId)
-                    delay(2000)
+                    val fresh = client.listMessages(sessionId)
+                    messages = fresh
+                    pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+                    val newAssistant = fresh.filterIsInstance<ChatItem.Assistant>()
+                        .lastOrNull { it.id !in preIds }
+                    val done = newAssistant?.finish != null && newAssistant.finish != "tool-calls"
+                    if (done) {
+                        newAssistant.error?.takeIf { it.isNotBlank() }?.let { error = it }
+                        break
+                    }
+                    if (waited >= 300_000L) break // pengaman 5 menit
+                    delay(1500)
+                    waited += 1500
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = e.message ?: I18n.s.sendFail
-                busy = false
-            }
-        }
-        waitJob = scope.launch {
-            try {
-                // Kalau `wait` balik sebelum turn benar-benar mulai (race),
-                // ulangi sampai ada pesan baru — jangan berhenti menonton dini.
-                var attempts = 0
-                while (attempts < 3) {
-                    client.waitIdle(sessionId)
-                    val grew = messages.size > preCount ||
-                        messages.any { it is ChatItem.User && it.text == trimmed }
-                    if (grew) break
-                    attempts++
-                    delay(800)
-                }
-                pollJob?.cancel()
                 refreshAll()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // dibiarkan: poll loop yang menampilkan error/progress
+                error = e.message ?: I18n.s.sendFail
             } finally {
-                pollJob?.cancel()
                 busy = false
                 justSent = null
             }
@@ -630,6 +618,14 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
             modifier = Modifier.fillMaxWidth(0.95f),
         ) {
             Column(Modifier.padding(12.dp, 8.dp)) {
+                item.error?.let { err ->
+                    Text(
+                        err,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 item.texts.forEach { t ->
                     MarkdownText(
                         markdown = t,

@@ -13,16 +13,20 @@ data class ToolUse(val id: String, val name: String, val status: String)
 
 /** Item chat siap-render. */
 sealed interface ChatItem {
-    data class User(val id: String, val text: String, val fileCount: Int) : ChatItem
+    val id: String
+
+    data class User(override val id: String, val text: String, val fileCount: Int) : ChatItem
     data class Assistant(
-        val id: String,
+        override val id: String,
         val texts: List<String>,
         val reasonings: List<String>,
         val tools: List<ToolUse>,
+        val finish: String? = null,
+        val error: String? = null,
     ) : ChatItem
 
     /** synthetic/system/dll — tampil kecil. */
-    data class Note(val id: String, val text: String) : ChatItem
+    data class Note(override val id: String, val text: String) : ChatItem
 }
 
 data class ModelInfo(val id: String, val name: String, val providerID: String, val free: Boolean = false)
