@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
+import com.arkacode.app.core.SessionRunRegistry
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.ChatSession
 import kotlinx.coroutines.Dispatchers
@@ -188,6 +189,8 @@ fun EngineScreen(
         }
         is Screen.Ready -> {
             val target = chatTarget
+            val chatClient = remember(port, password) { OpenCodeClient(port = port, password = password) }
+            val runs = remember(chatClient) { SessionRunRegistry(scope, chatClient) }
             if (showCaps) {
                 CapabilitiesScreen(
                     port = port,
@@ -206,6 +209,8 @@ fun EngineScreen(
                     sessionTitle = target.title,
                     port = port,
                     password = password,
+                    client = chatClient,
+                    registry = runs,
                     initialProviderID = target.providerID,
                     initialModelID = target.modelID,
                     onBack = { chatTarget = null },
