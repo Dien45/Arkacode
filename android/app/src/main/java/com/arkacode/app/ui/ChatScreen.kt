@@ -184,6 +184,7 @@ fun ChatScreen(
             } catch (e: Exception) {
                 // dibiarkan: poll loop yang menampilkan error/progress
             } finally {
+                pollJob?.cancel()
                 busy = false
             }
         }
@@ -638,11 +639,7 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                     Spacer(Modifier.height(4.dp))
                 }
                 item.tools.forEach { tool ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ),
-                    ) {
+                    ClayCard(contentPadding = PaddingValues(0.dp)) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -712,11 +709,7 @@ private fun ApprovalSheet(
                 fontWeight = FontWeight.Bold,
             )
             pending.take(5).forEach { req ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                ) {
+                ClayCard(contentPadding = PaddingValues(0.dp)) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
                             req.summary,
@@ -763,11 +756,9 @@ private fun AgentSheet(
                 Text(I18n.s.noAgents, style = MaterialTheme.typography.bodyMedium)
             }
             agents.forEach { a ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
+                ClayCard(
                     modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(0.dp),
                 ) {
                     Row(
                         Modifier
@@ -819,11 +810,9 @@ private fun CommandSheet(
                 Text(I18n.s.noCommands, style = MaterialTheme.typography.bodyMedium)
             }
             commands.forEach { c ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
+                ClayCard(
                     modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(0.dp),
                 ) {
                     Row(
                         Modifier
@@ -889,11 +878,9 @@ private fun RevertSheet(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 state.files.forEach { f ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ),
+                    ClayCard(
                         modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         Column(Modifier.padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {

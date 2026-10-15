@@ -2,6 +2,7 @@ package com.arkacode.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -218,9 +219,11 @@ fun EngineScreen(
                     onToggleTheme = onToggleTheme,
 
                     onStop = {
-                        engine.stopServer()
-                        lines = lines + "[${stamp()}] server dihentikan."
-                        screen = Screen.Stopped
+                        scope.launch {
+                            withContext(Dispatchers.IO) { engine.stopServer() }
+                            lines = lines + "[${stamp()}] server dihentikan."
+                            screen = Screen.Stopped
+                        }
                     },
                     onOpenChat = { chatTarget = it },
                     onNewSession = { chatTarget = it },
@@ -313,11 +316,11 @@ private fun BootScreen(
             Text(I18n.s.failedPrefix + it, color = MaterialTheme.colorScheme.error)
             Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text(I18n.s.retry) }
         }
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        ClayCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
+            contentPadding = PaddingValues(0.dp),
         ) {
             LazyColumn(
                 state = listState,

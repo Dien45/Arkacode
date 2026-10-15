@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -242,12 +243,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     val dirs = list.filter { it.isDir }.sortedBy { it.path }
                     val files = list.filterNot { it.isDir }.sortedBy { it.path }
                     items(dirs + files, key = { it.path }) { e ->
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ),
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp)),
-                        ) {
+                        ClayCard(contentPadding = PaddingValues(0.dp)) {
                             Row(
                                 Modifier
                                     .fillMaxWidth()
