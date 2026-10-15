@@ -73,14 +73,19 @@ class SessionRunRegistry(
         run(sessionId).error.value = null
     }
 
-    /** Kirim prompt. `false` bila kosong atau sesi masih sibuk. */
-    fun send(sessionId: String, text: String, model: ModelRef?): Boolean {
+    /** Kirim prompt (+ lampiran). `false` bila kosong & tanpa lampiran, atau sibuk. */
+    fun send(
+        sessionId: String,
+        text: String,
+        model: ModelRef?,
+        files: List<Attachment> = emptyList(),
+    ): Boolean {
         val trimmed = text.trim()
         val r = run(sessionId)
-        if (trimmed.isEmpty() || r.busy.value) return false
+        if ((trimmed.isEmpty() && files.isEmpty()) || r.busy.value) return false
         r.error.value = null
         r.busy.value = true
-        r.justSent.value = trimmed
+        r.justSent.value = trimmed.ifBlank { null }
         r.liveText.value = ""
         r.liveReasoning.value = ""
         r.toolLabel.value = null
@@ -89,7 +94,7 @@ class SessionRunRegistry(
         r.pollJob = scope.launch {
             try {
                 model?.let { m -> runCatching { client.switchModel(sessionId, m.providerID, m.id) } }
-                client.sendPrompt(sessionId, trimmed)
+                client.sendPrompt(sessionId, trimmed, files)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

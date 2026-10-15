@@ -3,9 +3,12 @@ package com.arkacode.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +38,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
@@ -74,6 +79,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.Attachment
+import com.arkacode.app.core.Attachments
+import com.arkacode.app.core.ImportResult
 import com.arkacode.app.core.PromptExpander
 import com.arkacode.app.core.SessionRunRegistry
 import com.arkacode.app.core.SlashSuggest
@@ -85,7 +93,9 @@ import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
 import com.arkacode.app.net.RevertState
 import com.arkacode.app.net.SkillInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Layar chat F1+: pesan dari server (poll 2 dtk saat sibuk), kirim async,
@@ -131,6 +141,27 @@ fun ChatScreen(
     var showCommands by remember { mutableStateOf(false) }
     var revert by remember { mutableStateOf<RevertState?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var attachments by remember { mutableStateOf(listOf<Attachment>()) }
+
+    val attachPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                val results = withContext(Dispatchers.IO) {
+                    uris.map { Attachments.import(context, sessionId, it) }
+                }
+                val imported = results.filterIsInstance<ImportResult.Success>().map { it.attachment }
+                attachments = attachments + imported
+                results.filterIsInstance<ImportResult.Failure>().firstOrNull()?.let { f ->
+                    run.error.value = when (f.reason) {
+                        ImportResult.Reason.TOO_LARGE -> I18n.s.attachTooLarge
+                        ImportResult.Reason.UNREADABLE -> I18n.s.attachUnreadable
+                    }
+                }
+            }
+        }
+    }
 
     fun refreshAll() = registry.refresh(sessionId)
 
@@ -163,7 +194,10 @@ fun ChatScreen(
 
     fun send(text: String) {
         val resolved = resolveSlash(text.trim()) ?: text
-        if (registry.send(sessionId, resolved, pinnedModel)) input = ""
+        if (registry.send(sessionId, resolved, pinnedModel, attachments)) {
+            input = ""
+            attachments = emptyList()
+        }
     }
 
     /** Jalankan command/skill langsung (dari sheet), tanpa lewat kolom input. */
@@ -205,12 +239,10 @@ fun ChatScreen(
                 title = sessionTitle.ifBlank { I18n.s.titleFallback },
                 modelLabel = pinnedModel?.let { "${it.providerID}/${it.id}" } ?: I18n.s.modelServer,
                 agentLabel = agentId ?: I18n.s.agentFallback,
-                busy = busy,
                 menuOpen = menuOpen,
                 canRevert = lastUser != null,
                 onBack = onBack,
                 onOpenPicker = { showPicker = true },
-                onStop = { stopAll() },
                 onToggleMenu = { menuOpen = !menuOpen },
                 onOpenAgents = { menuOpen = false; showAgents = true },
                 onOpenCommands = { menuOpen = false; showCommands = true },
@@ -237,6 +269,9 @@ fun ChatScreen(
                     busy = busy,
                     commands = commands,
                     skills = skills,
+                    attachments = attachments,
+                    onAttach = { attachPicker.launch(arrayOf("*/*")) },
+                    onRemoveAttachment = { attachments = attachments - it },
                     onSend = { send(input) },
                     onStop = { stopAll() },
                 )
@@ -424,12 +459,10 @@ private fun ChatBar(
     title: String,
     modelLabel: String,
     agentLabel: String,
-    busy: Boolean,
     menuOpen: Boolean,
     canRevert: Boolean,
     onBack: () -> Unit,
     onOpenPicker: () -> Unit,
-    onStop: () -> Unit,
     onToggleMenu: () -> Unit,
     onOpenAgents: () -> Unit,
     onOpenCommands: () -> Unit,
@@ -469,11 +502,6 @@ private fun ChatBar(
                     }
                 }
             }
-            if (busy) {
-                IconButton(onClick = onStop) {
-                    Icon(Icons.Default.Stop, contentDescription = I18n.s.stop)
-                }
-            }
             Box {
                 IconButton(onClick = onToggleMenu) {
                     Icon(Icons.Default.MoreVert, contentDescription = I18n.s.menu)
@@ -500,6 +528,9 @@ private fun ChatInput(
     busy: Boolean,
     commands: List<CommandInfo>,
     skills: List<SkillInfo>,
+    attachments: List<Attachment>,
+    onAttach: () -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -517,6 +548,19 @@ private fun ChatInput(
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
     ) {
+        if (attachments.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                attachments.forEach { a ->
+                    AttachmentChip(a, onRemove = { onRemoveAttachment(a) })
+                }
+            }
+        }
         if (suggestions.isNotEmpty()) {
             SlashSuggestList(
                 suggestions = suggestions,
@@ -541,6 +585,11 @@ private fun ChatInput(
                     value = input,
                     onValueChange = onInputChange,
                     placeholder = { Text(I18n.s.slashHint) },
+                    leadingIcon = {
+                        IconButton(onClick = onAttach) {
+                            Icon(Icons.Default.AttachFile, contentDescription = I18n.s.attachFile)
+                        }
+                    },
                     singleLine = false,
                     minLines = 1,
                     maxLines = 5,
@@ -570,7 +619,9 @@ private fun ChatInput(
                     )
                     .clip(ClayShapePill)
                     .background(accent)
-                    .clickable(enabled = busy || input.isNotBlank()) { if (busy) onStop() else onSend() },
+                    .clickable(enabled = busy || input.isNotBlank() || attachments.isNotEmpty()) {
+                        if (busy) onStop() else onSend()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -580,6 +631,31 @@ private fun ChatInput(
                     modifier = Modifier.size(22.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentChip(a: Attachment, onRemove: () -> Unit) {
+    Row(
+        Modifier
+            .clip(ClayShapePill)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            a.name,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            maxLines = 1,
+        )
+        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = I18n.s.removeFile,
+                modifier = Modifier.size(14.dp),
+            )
         }
     }
 }

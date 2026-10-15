@@ -1,5 +1,6 @@
 package com.arkacode.app.net
 
+import com.arkacode.app.core.Attachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -400,13 +401,19 @@ class OpenCodeClient(
     suspend fun sendPrompt(
         sessionId: String,
         text: String,
-        files: List<String> = emptyList(),
+        files: List<Attachment> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("prompt", buildJsonObject {
                 put("text", text)
                 if (files.isNotEmpty()) {
-                    put("files", JsonArray(files.map { JsonPrimitive(it) }))
+                    put("files", JsonArray(files.map { a ->
+                        buildJsonObject {
+                            put("uri", a.uri)
+                            put("mime", a.mime)
+                            put("name", a.name)
+                        }
+                    }))
                 }
             })
         }
