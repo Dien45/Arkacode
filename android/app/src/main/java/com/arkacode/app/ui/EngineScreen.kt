@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
@@ -240,6 +241,8 @@ fun EngineScreen(
             Column(
                 Modifier
                     .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -299,6 +302,8 @@ private fun BootScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -380,7 +385,7 @@ private fun ReadyScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
@@ -428,15 +433,25 @@ private fun ReadyScreen(
         val all = sessions
         val list = all?.filter { it.id !in hidden }
         if (list == null) {
-            Text(if (loading) I18n.s.loadingSessions else I18n.s.loadSessionsFailed, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (loading) I18n.s.loadingSessions else I18n.s.loadSessionsFailed,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
         } else if (list.isEmpty()) {
             Text(
                 I18n.s.noSessions,
                 style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
             )
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                list.take(50).forEach { s ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(list.take(50), key = { it.id }) { s ->
                     val shown = s.copy(title = titles[s.id] ?: s.title)
                     ClayCard(
                         modifier = Modifier.clickable { onOpenChat(shown) },
