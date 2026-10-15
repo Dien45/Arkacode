@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
@@ -62,6 +63,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.PromptExpander
+import com.arkacode.app.core.SessionRunRegistry
 import com.arkacode.app.net.AgentInfo
 import com.arkacode.app.net.ChatItem
 import com.arkacode.app.net.CommandInfo
@@ -69,10 +72,7 @@ import com.arkacode.app.net.ModelRef
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
 import com.arkacode.app.net.RevertState
-import com.arkacode.app.net.ServerEvent
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.arkacode.app.net.SkillInfo
 import kotlinx.coroutines.launch
 
 /**
@@ -87,111 +87,78 @@ fun ChatScreen(
     sessionTitle: String,
     port: Int,
     password: String,
+    client: OpenCodeClient,
+    registry: SessionRunRegistry,
     initialProviderID: String?,
     initialModelID: String?,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val client = remember(port, password) { OpenCodeClient(port = port, password = password) }
     val listState = rememberLazyListState()
 
-    var messages by remember { mutableStateOf(listOf<ChatItem>()) }
+    val run = registry.run(sessionId)
+    val messages by run.messages
+    val busy by run.busy
+    val error by run.error
+    val pending by run.pending
+    val liveText by run.liveText
+    val liveReasoning by run.liveReasoning
+    val toolLabel by run.toolLabel
+    val justSent by run.justSent
+
     var input by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf(listOf<PermissionReq>()) }
     var pinnedModel by remember { mutableStateOf<ModelRef?>(null) }
     var showPicker by remember { mutableStateOf(false) }
-    var pollJob by remember { mutableStateOf<Job?>(null) }
     var showFilesTab by remember { mutableStateOf(false) }
     var agents by remember { mutableStateOf(listOf<AgentInfo>()) }
     var agentId by remember { mutableStateOf<String?>(null) }
     var commands by remember { mutableStateOf(listOf<CommandInfo>()) }
+    var skills by remember { mutableStateOf(listOf<SkillInfo>()) }
     var showAgents by remember { mutableStateOf(false) }
     var showCommands by remember { mutableStateOf(false) }
     var revert by remember { mutableStateOf<RevertState?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
-    var liveText by remember { mutableStateOf("") }
-    var liveReasoning by remember { mutableStateOf("") }
-    var toolLabel by remember { mutableStateOf<String?>(null) }
-    var refreshJob by remember { mutableStateOf<Job?>(null) }
-    var justSent by remember { mutableStateOf<String?>(null) }
 
-    suspend fun refreshAll() {
-        messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
-        pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+    fun refreshAll() = registry.refresh(sessionId)
+
+    fun stopAll() = registry.stop(sessionId)
+
+    /** Teks prompt untuk sebuah command (template di-expand) atau skill (isi). */
+    fun promptForCommand(name: String, args: List<String>): String {
+        val c = commands.firstOrNull { it.name == name }
+        val tpl = c?.template
+        return if (tpl.isNullOrBlank()) "/$name ${args.joinToString(" ")}".trim()
+        else PromptExpander.expand(tpl, args)
     }
 
-    fun scheduleRefresh(delayMs: Long = 350L) {
-        refreshJob?.cancel()
-        refreshJob = scope.launch {
-            delay(delayMs)
-            refreshAll()
-        }
+    fun promptForSkill(skill: SkillInfo): String {
+        val body = skill.content ?: skill.description
+        return "Jalankan skill \"${skill.name}\" dan ikuti instruksinya berikut.\n\n---\n$body\n---"
     }
 
-    fun stopAll() {
-        pollJob?.cancel()
-        scope.launch {
-            client.interrupt(sessionId)
-            refreshAll()
-            busy = false
-        }
-        busy = false
-        liveText = ""
-        liveReasoning = ""
-        toolLabel = null
-        justSent = null
+    /** `/nama arg…` → prompt hasil ekspansi; `null` bila bukan command/skill dikenal. */
+    fun resolveSlash(text: String): String? {
+        if (!text.startsWith("/")) return null
+        val rest = text.drop(1)
+        val name = rest.substringBefore(' ').trim()
+        if (name.isEmpty()) return null
+        val args = rest.substringAfter(' ', "").split(' ', '\n', '\t').filter { it.isNotBlank() }
+        commands.firstOrNull { it.name == name }?.let { return promptForCommand(name, args) }
+        skills.firstOrNull { it.name == name }?.let { return promptForSkill(it) }
+        return null
     }
 
     fun send(text: String) {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty() || busy) return
-        error = null
-        busy = true
-        input = ""
-        justSent = trimmed
-        liveText = ""
-        liveReasoning = ""
-        toolLabel = null
-        pollJob?.cancel()
-        // Server v1.19 tidak punya `session.wait` (503) dan tidak mengirim
-        // event idle → penyelesaian turn dideteksi dari `finish` pesan assistant.
-        val preIds = messages.map { it.id }.toSet()
-        pollJob = scope.launch {
-            try {
-                pinnedModel?.let { m ->
-                    runCatching { client.switchModel(sessionId, m.providerID, m.id) }
-                }
-                client.sendPrompt(sessionId, trimmed)
-                var waited = 0L
-                while (true) {
-                    val fresh = client.listMessages(sessionId)
-                    messages = fresh
-                    pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
-                    val newAssistant = fresh.filterIsInstance<ChatItem.Assistant>()
-                        .lastOrNull { it.id !in preIds }
-                    val done = newAssistant?.finish != null && newAssistant.finish != "tool-calls"
-                    if (done) {
-                        newAssistant.error?.takeIf { it.isNotBlank() }?.let { error = it }
-                        break
-                    }
-                    if (waited >= 300_000L) break // pengaman 5 menit
-                    delay(1500)
-                    waited += 1500
-                }
-                refreshAll()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = e.message ?: I18n.s.sendFail
-            } finally {
-                busy = false
-                justSent = null
-            }
-        }
+        val resolved = resolveSlash(text.trim()) ?: text
+        if (registry.send(sessionId, resolved, pinnedModel)) input = ""
     }
+
+    /** Jalankan command/skill langsung (dari sheet), tanpa lewat kolom input. */
+    fun runPromptText(prompt: String) {
+        registry.send(sessionId, prompt, pinnedModel)
+    }
+
 
     fun openRevert(messageId: String) {
         scope.launch {
@@ -201,63 +168,21 @@ fun ChatScreen(
     }
 
     LaunchedEffect(sessionId) {
-        refreshAll()
+        registry.attach(sessionId)
         val pin = if (initialProviderID != null && initialModelID != null) {
             ModelRef(initialProviderID, initialModelID)
         } else null
         pinnedModel = pin
         runCatching { client.listAgents() }.getOrNull()?.let { agents = it.filter { a -> !a.hidden } }
         runCatching { client.listCommands() }.getOrNull()?.let { commands = it }
+        runCatching { client.listSkills() }.getOrNull()?.let { skills = it }
     }
     LaunchedEffect(messages.size) {
         val count = listState.layoutInfo.totalItemsCount
         if (count > 0) listState.scrollToItem(count - 1)
     }
     LaunchedEffect(showFilesTab) {
-        if (!showFilesTab) {
-            messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
-        }
-    }
-    // Event server (SSE semantik) untuk update live; polling 2 dtk tetap jaring pengaman.
-    LaunchedEffect(busy, sessionId) {
-        if (!busy) return@LaunchedEffect
-        try {
-            client.serverEvents().collect { ev ->
-                if (ev.sessionID != null && ev.sessionID != sessionId) return@collect
-                when (ev) {
-                    is ServerEvent.Connected -> {}
-                    is ServerEvent.Status -> when (ev.status) {
-                        "idle" -> {
-                            busy = false
-                            liveText = ""
-                            liveReasoning = ""
-                            toolLabel = null
-                            refreshAll()
-                        }
-                        "retry" -> error = ev.message
-                        else -> {}
-                    }
-                    is ServerEvent.TextDelta -> {
-                        liveText += ev.delta
-                        scheduleRefresh(600L)
-                    }
-                    is ServerEvent.TextEnded -> {
-                        if (ev.text.isNotBlank()) liveText = ev.text
-                    }
-                    is ServerEvent.ReasoningDelta -> liveReasoning += ev.delta
-                    is ServerEvent.Tool -> {
-                        if (ev.label.isNotBlank()) toolLabel = ev.label
-                        scheduleRefresh(400L)
-                    }
-                    is ServerEvent.Permission -> {
-                        pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
-                    }
-                    is ServerEvent.Error -> error = ev.message
-                    is ServerEvent.Other -> scheduleRefresh(400L)
-                }
-            }
-        } catch (e: Exception) {
-        }
+        if (!showFilesTab) refreshAll()
     }
 
     val lastUser = messages.filterIsInstance<ChatItem.User>().lastOrNull()
@@ -280,9 +205,9 @@ fun ChatScreen(
                 onCompact = {
                     menuOpen = false
                     scope.launch {
-                        error = null
+                        run.error.value = null
                         runCatching { client.compactSession(sessionId) }
-                            .onFailure { error = it.message ?: I18n.s.compactFail }
+                            .onFailure { run.error.value = it.message ?: I18n.s.compactFail }
                         refreshAll()
                     }
                 },
@@ -322,7 +247,7 @@ fun ChatScreen(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { error = null }) { Text(I18n.s.close) }
+                    TextButton(onClick = { run.error.value = null }) { Text(I18n.s.close) }
                 }
             }
             Row(
@@ -408,7 +333,7 @@ fun ChatScreen(
             onReply = { req, reply ->
                 scope.launch {
                     runCatching { client.replyPermission(sessionId, req.id, reply) }
-                    pending = runCatching { client.listPermissions(sessionId) }.getOrDefault(pending)
+                    registry.refresh(sessionId)
                 }
             },
             onDismiss = { /* tetap tampil selama masih pending */ },
@@ -445,8 +370,13 @@ fun ChatScreen(
     if (showCommands) {
         CommandSheet(
             commands = commands,
-            onPick = { name ->
-                input = "/$name "
+            skills = skills,
+            onRunCommand = { name ->
+                runPromptText(promptForCommand(name, emptyList()))
+                showCommands = false
+            },
+            onRunSkill = { skill ->
+                runPromptText(promptForSkill(skill))
                 showCommands = false
             },
             onDismiss = { showCommands = false },
@@ -459,7 +389,7 @@ fun ChatScreen(
             onApply = {
                 scope.launch {
                     runCatching { client.commitRevert(sessionId) }
-                        .onFailure { error = it.message ?: I18n.s.revertFail }
+                        .onFailure { run.error.value = it.message ?: I18n.s.revertFail }
                     revert = null
                     refreshAll()
                 }
@@ -807,13 +737,17 @@ private fun AgentSheet(
 @Composable
 private fun CommandSheet(
     commands: List<CommandInfo>,
-    onPick: (String) -> Unit,
+    skills: List<SkillInfo>,
+    onRunCommand: (String) -> Unit,
+    onRunSkill: (SkillInfo) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
                 .fillMaxWidth()
+                .heightIn(max = 480.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -847,7 +781,40 @@ private fun CommandSheet(
                                 )
                             }
                         }
-                        TextButton(onClick = { onPick(c.name) }) { Text(I18n.s.use) }
+                        TextButton(onClick = { onRunCommand(c.name) }) { Text(I18n.s.use) }
+                    }
+                }
+            }
+            if (skills.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    I18n.s.tabSkills,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                skills.forEach { s ->
+                    ClayCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(s.name, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                if (s.description.isNotBlank()) {
+                                    Text(
+                                        s.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            TextButton(onClick = { onRunSkill(s) }) { Text(I18n.s.use) }
+                        }
                     }
                 }
             }

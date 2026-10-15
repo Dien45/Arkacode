@@ -41,10 +41,25 @@ data class AgentInfo(
 )
 
 /** Perintah (slash command) yang terdaftar di server. */
-data class CommandInfo(val name: String, val description: String, val agent: String?)
+data class CommandInfo(
+    val name: String,
+    val description: String,
+    val agent: String?,
+    /** Template body; di-expand klien karena server tak meng-expand slash. */
+    val template: String? = null,
+    val model: String? = null,
+    val subtask: Boolean = false,
+)
 
 /** Skill opencode (folder/URL/embedded). */
-data class SkillInfo(val name: String, val description: String, val location: String, val slash: Boolean)
+data class SkillInfo(
+    val name: String,
+    val description: String,
+    val location: String,
+    val slash: Boolean,
+    /** Isi skill (instruksi) — dikirim sebagai prompt saat "run". */
+    val content: String? = null,
+)
 
 /** Satu berkas dalam rencana revert. */
 data class FileDiffEntry(

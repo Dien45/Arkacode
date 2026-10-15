@@ -318,6 +318,31 @@ class OpenCodeClient(
         }
     }
 
+    /**
+     * Set id sesi yang sedang menjalankan turn di server. Bentuk respons
+     * `{data:{<sid>:{type:"running"}}}`, tapi ditoleransi juga array objek.
+     */
+    suspend fun sessionActive(): Set<String> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/session/active")) }.getOrNull()
+            ?: return@withContext emptySet()
+        val data = (el as? JsonObject)?.get("data") ?: el
+        val out = mutableSetOf<String>()
+        when (data) {
+            is JsonObject -> data.forEach { (key, value) ->
+                val type = (value as? JsonObject)?.str("type")
+                if (type == null || type == "running" || type == "busy") out.add(key)
+            }
+            is JsonArray -> data.forEach { item ->
+                val o = item as? JsonObject ?: return@forEach
+                val id = o.str("id") ?: o.str("sessionID") ?: return@forEach
+                val type = o.str("type") ?: o.str("status")
+                if (type == null || type == "running" || type == "busy") out.add(id)
+            }
+            else -> {}
+        }
+        out
+    }
+
     suspend fun createSession(): ChatSession = withContext(Dispatchers.IO) {
         val el = call(postReq("/api/session", "{}"))
         val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
@@ -372,8 +397,19 @@ class OpenCodeClient(
     }
 
     /** Kirim pesan (async di server — return saat admit, bukan saat selesai). */
-    suspend fun sendPrompt(sessionId: String, text: String): String = withContext(Dispatchers.IO) {
-        val body = buildJsonObject { put("prompt", buildJsonObject { put("text", text) }) }
+    suspend fun sendPrompt(
+        sessionId: String,
+        text: String,
+        files: List<String> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("prompt", buildJsonObject {
+                put("text", text)
+                if (files.isNotEmpty()) {
+                    put("files", JsonArray(files.map { JsonPrimitive(it) }))
+                }
+            })
+        }
         val el = call(postReq("/api/session/$sessionId/prompt", body.toString()))
         val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
         o.str("id") ?: ""
@@ -498,7 +534,14 @@ class OpenCodeClient(
         arr.mapNotNull { item ->
             val o = item as? JsonObject ?: return@mapNotNull null
             val name = o.str("name") ?: return@mapNotNull null
-            CommandInfo(name, o.str("description") ?: "", o.str("agent"))
+            CommandInfo(
+                name = name,
+                description = o.str("description") ?: "",
+                agent = o.str("agent"),
+                template = o.str("template"),
+                model = o.str("model"),
+                subtask = (o["subtask"] as? JsonPrimitive)?.booleanOrNull == true,
+            )
         }
     }
 
@@ -516,6 +559,7 @@ class OpenCodeClient(
                 description = o.str("description") ?: "",
                 location = o.str("location") ?: "",
                 slash = (o["slash"] as? JsonPrimitive)?.booleanOrNull == true,
+                content = o.str("content"),
             )
         }
     }
