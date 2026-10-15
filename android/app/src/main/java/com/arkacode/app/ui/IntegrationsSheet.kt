@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -90,6 +91,7 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
     var active by remember { mutableStateOf<ActiveOAuth?>(null) }
     var statusText by remember { mutableStateOf<String?>(null) }
     var codeInput by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
 
     fun reload() {
         scope.launch {
@@ -281,8 +283,23 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
                 }
             } else {
                 val list = integrations ?: emptyList()
+                val filtered = if (query.isBlank()) {
+                    list
+                } else {
+                    list.filter { it.name.contains(query.trim(), ignoreCase = true) }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    placeholder = { Text(I18n.s.searchIntegrations) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 if (list.isEmpty()) {
                     Text(I18n.s.noIntegrations, style = MaterialTheme.typography.bodyMedium)
+                } else if (filtered.isEmpty()) {
+                    Text(I18n.s.noIntegrationsMatch, style = MaterialTheme.typography.bodyMedium)
                 }
                 Column(
                     Modifier
@@ -290,7 +307,7 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    list.forEach { mi ->
+                    filtered.forEach { mi ->
                         IntegrationCard(
                             mi = mi,
                             promptValues = promptValues,

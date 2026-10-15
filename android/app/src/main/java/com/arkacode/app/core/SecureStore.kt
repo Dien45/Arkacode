@@ -54,4 +54,18 @@ object SecureStore {
             e.apply()
         }
     }
+
+    /** GitHub Personal Access Token (tersimpan terenkripsi). */
+    fun getGitPat(context: Context): String? = runCatching {
+        prefs(context).getString("git_pat", null)
+    }.getOrNull()
+
+    fun setGitPat(context: Context, value: String) {
+        runCatching {
+            val e = prefs(context).edit()
+            if (value.isBlank()) e.remove("git_pat")
+            else e.putString("git_pat", value.trim())
+            e.apply()
+        }
+    }
 }

@@ -5,10 +5,14 @@ import com.arkacode.app.net.ChatItem
 import com.arkacode.app.net.ModelRef
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
+import com.arkacode.app.net.QuestionRequest
+import com.arkacode.app.net.ServerEvent
+import com.arkacode.app.net.ToolUse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /**
@@ -20,8 +24,10 @@ class SessionRun {
     val busy = mutableStateOf(false)
     val messages = mutableStateOf<List<ChatItem>>(emptyList())
     val pending = mutableStateOf<List<PermissionReq>>(emptyList())
+    val questions = mutableStateOf<List<QuestionRequest>>(emptyList())
     val liveText = mutableStateOf("")
     val liveReasoning = mutableStateOf("")
+    val liveTools = mutableStateOf<List<ToolUse>>(emptyList())
     val toolLabel = mutableStateOf<String?>(null)
     val justSent = mutableStateOf<String?>(null)
     val error = mutableStateOf<String?>(null)
@@ -42,17 +48,20 @@ class SessionRunRegistry(
     private val client: OpenCodeClient,
 ) {
     private val runs = LinkedHashMap<String, SessionRun>()
+    private var eventsJob: Job? = null
 
     fun run(sessionId: String): SessionRun = runs.getOrPut(sessionId) { SessionRun() }
 
     /** Muat awal + sambung kembali ke turn yang masih berjalan di server. */
     fun attach(sessionId: String) {
         val r = run(sessionId)
+        ensureEvents()
         if (r.attached) return
         r.attached = true
         scope.launch {
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
             runCatching { client.listPermissions(sessionId) }.getOrNull()?.let { r.pending.value = it }
+            runCatching { client.listQuestions(sessionId) }.getOrNull()?.let { r.questions.value = it }
             val active = runCatching { client.sessionActive() }.getOrDefault(emptySet())
             if (sessionId in active && !r.busy.value) {
                 r.busy.value = true
@@ -66,6 +75,54 @@ class SessionRunRegistry(
         scope.launch {
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
             runCatching { client.listPermissions(sessionId) }.getOrNull()?.let { r.pending.value = it }
+            runCatching { client.listQuestions(sessionId) }.getOrNull()?.let { r.questions.value = it }
+        }
+    }
+
+    /**
+     * Satu kolektor SSE untuk semua sesi: mengubah event server (tool, teks
+     * streaming, pertanyaan, persetujuan, idle) menjadi update state seketika,
+     * melengkapi polling sebagai jaring pengaman.
+     */
+    private fun ensureEvents() {
+        if (eventsJob?.isActive == true) return
+        eventsJob = scope.launch {
+            client.serverEvents().collect { ev ->
+                val sid = ev.sessionID ?: return@collect
+                if (!runs.containsKey(sid)) return@collect
+                val r = run(sid)
+                when (ev) {
+                    is ServerEvent.Tool -> {
+                        if (ev.label.isNotBlank()) r.toolLabel.value = ev.label
+                        if (ev.status.isNotBlank()) {
+                            val key = ev.id.ifBlank { "live-" + ev.label.ifBlank { "tool" } }
+                            val cur = r.liveTools.value.toMutableList()
+                            val i = cur.indexOfFirst { it.id == key }
+                            val name = ev.label.ifBlank { cur.getOrNull(i)?.name ?: "tool" }
+                            val entry = ToolUse(key, name, ev.status)
+                            if (i >= 0) cur[i] = entry else cur.add(entry)
+                            r.liveTools.value = cur
+                        }
+                    }
+                    is ServerEvent.TextDelta -> r.liveText.value += ev.delta
+                    is ServerEvent.TextEnded -> if (ev.text.isNotBlank()) r.liveText.value = ev.text
+                    is ServerEvent.ReasoningDelta -> r.liveReasoning.value += ev.delta
+                    is ServerEvent.Permission -> scope.launch {
+                        runCatching { client.listPermissions(sid) }.getOrNull()?.let { r.pending.value = it }
+                    }
+                    is ServerEvent.Question -> scope.launch {
+                        runCatching { client.listQuestions(sid) }.getOrNull()?.let { r.questions.value = it }
+                    }
+                    is ServerEvent.Status -> if (ev.status == "idle" && r.busy.value) {
+                        r.busy.value = false
+                        r.justSent.value = null
+                        r.toolLabel.value = null
+                        r.liveTools.value = emptyList()
+                    }
+                    is ServerEvent.Error -> r.error.value = ev.message
+                    else -> {}
+                }
+            }
         }
     }
 
@@ -88,6 +145,7 @@ class SessionRunRegistry(
         r.justSent.value = trimmed.ifBlank { null }
         r.liveText.value = ""
         r.liveReasoning.value = ""
+        r.liveTools.value = emptyList()
         r.toolLabel.value = null
         r.preIds = snapshotPreIds(r.messages.value)
         r.pollJob?.cancel()
@@ -115,6 +173,7 @@ class SessionRunRegistry(
         r.busy.value = false
         r.liveText.value = ""
         r.liveReasoning.value = ""
+        r.liveTools.value = emptyList()
         r.toolLabel.value = null
         r.justSent.value = null
         scope.launch {
@@ -137,6 +196,7 @@ class SessionRunRegistry(
             while (true) {
                 runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
                 runCatching { client.listPermissions(sessionId) }.getOrNull()?.let { r.pending.value = it }
+                runCatching { client.listQuestions(sessionId) }.getOrNull()?.let { r.questions.value = it }
                 val newAssistant = r.messages.value
                     .filterIsInstance<ChatItem.Assistant>()
                     .lastOrNull { it.id !in r.preIds }
@@ -154,6 +214,8 @@ class SessionRunRegistry(
         } finally {
             r.busy.value = false
             r.justSent.value = null
+            r.toolLabel.value = null
+            r.liveTools.value = emptyList()
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
         }
     }

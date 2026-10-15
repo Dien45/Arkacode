@@ -1,5 +1,6 @@
 package com.arkacode.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -103,6 +105,7 @@ fun EngineScreen(
     var chatTarget by remember { mutableStateOf<ChatSession?>(null) }
     var showProviders by remember { mutableStateOf(false) }
     var showCaps by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     var lines by remember { mutableStateOf(listOf<String>()) }
     var failMsg by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
@@ -190,6 +193,14 @@ fun EngineScreen(
             val target = chatTarget
             val chatClient = remember(port, password) { OpenCodeClient(port = port, password = password) }
             val runs = remember(chatClient) { SessionRunRegistry(scope, chatClient) }
+            BackHandler(enabled = showCaps || showProviders || showSettings || target != null) {
+                when {
+                    showCaps -> showCaps = false
+                    showProviders -> showProviders = false
+                    showSettings -> showSettings = false
+                    else -> chatTarget = null
+                }
+            }
             if (showCaps) {
                 CapabilitiesScreen(
                     port = port,
@@ -201,6 +212,22 @@ fun EngineScreen(
                     port = port,
                     password = password,
                     onBack = { showProviders = false },
+                )
+            } else if (showSettings) {
+                SettingsScreen(
+                    port = port,
+                    password = password,
+                    isDark = darkTheme,
+                    onToggleTheme = onToggleTheme,
+                    onBack = { showSettings = false },
+                    onStop = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { engine.stopServer() }
+                            lines = lines + "[${stamp()}] server dihentikan."
+                            showSettings = false
+                            screen = Screen.Stopped
+                        }
+                    },
                 )
             } else if (target != null) {
                 ChatScreen(
@@ -234,6 +261,7 @@ fun EngineScreen(
                     onNewSession = { chatTarget = it },
                     onOpenProviders = { showProviders = true },
                     onOpenCapabilities = { showCaps = true },
+                    onOpenSettings = { showSettings = true },
                 )
             }
         }
@@ -357,6 +385,7 @@ private fun ReadyScreen(
     onNewSession: (ChatSession) -> Unit,
     onOpenProviders: () -> Unit,
     onOpenCapabilities: () -> Unit,
+    onOpenSettings: () -> Unit,
     isDark: Boolean,
     onToggleTheme: () -> Unit,
 ) {
@@ -477,6 +506,7 @@ private fun ReadyScreen(
                 ClayNavItem(Icons.Default.List, I18n.s.navSessions, selected = true, onClick = {}),
                 ClayNavItem(Icons.Default.SmartToy, I18n.s.navAI, selected = false, onClick = onOpenProviders),
                 ClayNavItem(Icons.Default.Build, I18n.s.navCaps, selected = false, onClick = onOpenCapabilities),
+                ClayNavItem(Icons.Default.Settings, I18n.s.navSettings, selected = false, onClick = onOpenSettings),
             ),
         )
     }
