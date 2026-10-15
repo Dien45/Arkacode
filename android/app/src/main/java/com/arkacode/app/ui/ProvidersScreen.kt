@@ -196,7 +196,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
             val list = providers ?: emptyList()
             val byProvider = models.groupBy { it.providerID }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(list, key = { it.id }) { p ->
+                items(list.distinctBy { it.id }, key = { it.id }) { p ->
                     val ms = byProvider[p.id] ?: emptyList()
                     ClayCard(contentPadding = PaddingValues(0.dp)) {
                         Column(Modifier.padding(10.dp)) {
@@ -269,7 +269,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                                 }
                                 if (ms.isNotEmpty()) {
                                     Text(I18n.s.modelsLabel, style = MaterialTheme.typography.labelMedium)
-                                    ms.take(30).forEach { m ->
+                                    ms.distinctBy { m -> m.id }.take(30).forEach { m ->
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 m.name,
