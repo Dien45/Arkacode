@@ -97,13 +97,13 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 notice?.let {
-                    ClayCard {
+                    ClayCard(modifier = Modifier.fillMaxWidth()) {
                         Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
                         TextButton(onClick = { notice = null }) { Text(I18n.s.close) }
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsLanguage, fontWeight = FontWeight.SemiBold)
                         Row(
@@ -124,7 +124,7 @@ fun SettingsScreen(
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsTheme, fontWeight = FontWeight.SemiBold)
                         Row(
@@ -138,7 +138,7 @@ fun SettingsScreen(
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsServer, fontWeight = FontWeight.SemiBold)
                         OutlinedTextField(
@@ -171,7 +171,7 @@ fun SettingsScreen(
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsIntegrations, fontWeight = FontWeight.SemiBold)
                         Button(onClick = { onShowIntegrations?.invoke() ?: run { showIntegrationsSheet = true } }) {
@@ -180,7 +180,7 @@ fun SettingsScreen(
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsGitPat, fontWeight = FontWeight.SemiBold)
                         Text(
@@ -220,7 +220,7 @@ fun SettingsScreen(
                     }
                 }
 
-                ClayCard {
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(I18n.s.settingsAbout, fontWeight = FontWeight.SemiBold)
                         Text("Arkacode", style = MaterialTheme.typography.bodySmall)
