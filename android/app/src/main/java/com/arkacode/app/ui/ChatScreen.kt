@@ -30,6 +30,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -64,13 +66,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.PromptExpander
 import com.arkacode.app.core.SessionRunRegistry
+import com.arkacode.app.core.SlashSuggest
 import com.arkacode.app.net.AgentInfo
 import com.arkacode.app.net.ChatItem
 import com.arkacode.app.net.CommandInfo
@@ -229,6 +235,8 @@ fun ChatScreen(
                     input = input,
                     onInputChange = { input = it },
                     busy = busy,
+                    commands = commands,
+                    skills = skills,
                     onSend = { send(input) },
                     onStop = { stopAll() },
                 )
@@ -490,60 +498,88 @@ private fun ChatInput(
     input: String,
     onInputChange: (String) -> Unit,
     busy: Boolean,
+    commands: List<CommandInfo>,
+    skills: List<SkillInfo>,
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
-    Row(
+    val focusRequester = remember { FocusRequester() }
+    val token = SlashSuggest.token(input)
+    val suggestions = if (token != null) {
+        SlashSuggest.filter(token, commands, skills)
+    } else {
+        emptyList()
+    }
+
+    Column(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ClaySurface(
-            modifier = Modifier.weight(1f),
-            shape = ClayShapeLarge,
-            elevation = 10.dp,
-        ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                placeholder = { Text(I18n.s.writeMessage) },
-                singleLine = false,
-                minLines = 1,
-                maxLines = 5,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                ),
-                modifier = Modifier.fillMaxWidth(),
+        if (suggestions.isNotEmpty()) {
+            SlashSuggestList(
+                suggestions = suggestions,
+                onSelect = { s ->
+                    onInputChange(SlashSuggest.replacement(s.name))
+                    focusRequester.requestFocus()
+                },
+                modifier = Modifier.padding(bottom = 6.dp),
             )
         }
-        val accent = if (busy) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary
-        val accentInk = if (busy) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
-        Box(
-            Modifier
-                .size(52.dp)
-                .shadow(
-                    elevation = 8.dp,
-                    shape = ClayShapePill,
-                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
-                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
-                )
-                .clip(ClayShapePill)
-                .background(accent)
-                .clickable(enabled = busy || input.isNotBlank()) { if (busy) onStop() else onSend() },
-            contentAlignment = Alignment.Center,
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(
-                if (busy) Icons.Default.Stop else Icons.Default.Send,
-                contentDescription = if (busy) I18n.s.stop else I18n.s.send,
-                tint = accentInk,
-                modifier = Modifier.size(22.dp),
-            )
+            ClaySurface(
+                modifier = Modifier.weight(1f),
+                shape = ClayShapeLarge,
+                elevation = 10.dp,
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    placeholder = { Text(I18n.s.slashHint) },
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 5,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                )
+            }
+            val accent = if (busy) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary
+            val accentInk = if (busy) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
+            Box(
+                Modifier
+                    .size(52.dp)
+                    .shadow(
+                        elevation = 8.dp,
+                        shape = ClayShapePill,
+                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
+                    )
+                    .clip(ClayShapePill)
+                    .background(accent)
+                    .clickable(enabled = busy || input.isNotBlank()) { if (busy) onStop() else onSend() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (busy) Icons.Default.Stop else Icons.Default.Send,
+                    contentDescription = if (busy) I18n.s.stop else I18n.s.send,
+                    tint = accentInk,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
