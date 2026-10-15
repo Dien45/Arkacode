@@ -78,6 +78,21 @@ data class ModelRef(val providerID: String, val id: String)
 /** Permintaan persetujuan (ringkasan best-effort dari field mentahnya). */
 data class PermissionReq(val id: String, val summary: String)
 
+/** Satu opsi jawaban untuk pertanyaan agent (question tool). */
+data class QuestionOption(val label: String, val description: String)
+
+/** Satu pertanyaan dari agent (question tool). */
+data class QuestionInfo(
+    val header: String,
+    val question: String,
+    val options: List<QuestionOption>,
+    val multiple: Boolean,
+    val custom: Boolean,
+)
+
+/** Permintaan pertanyaan yang menunggu jawaban user. */
+data class QuestionRequest(val id: String, val questions: List<QuestionInfo>)
+
 /** Entri filesystem server (path relatif ke working dir). */
 data class FsEntry(val path: String, val isDir: Boolean)
 
@@ -108,11 +123,19 @@ sealed interface ServerEvent {
     /** Potongan reasoning (streaming). */
     data class ReasoningDelta(override val sessionID: String?, val messageID: String?, val delta: String) : ServerEvent
 
-    /** Perubahan status tool (label boleh kosong). */
-    data class Tool(override val sessionID: String?, val label: String, val status: String) : ServerEvent
+    /** Perubahan status tool (label/id boleh kosong pada event legacy). */
+    data class Tool(
+        override val sessionID: String?,
+        val id: String,
+        val label: String,
+        val status: String,
+    ) : ServerEvent
 
     /** Persetujuan muncul/selesai. */
     data class Permission(override val sessionID: String?) : ServerEvent
+
+    /** Pertanyaan agent (question tool) muncul/selesai. */
+    data class Question(override val sessionID: String?) : ServerEvent
 
     /** Error sesi. */
     data class Error(override val sessionID: String?, val message: String) : ServerEvent

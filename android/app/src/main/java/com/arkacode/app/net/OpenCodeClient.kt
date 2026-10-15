@@ -280,16 +280,24 @@ class OpenCodeClient(
                 val part = payload.obj("part")
                 when (part.str("type")) {
                     "text" -> ServerEvent.TextEnded(sid, part.str("messageID"), part.str("text") ?: "")
-                    "tool" -> ServerEvent.Tool(sid, part.str("tool") ?: "", part.obj("state").str("status") ?: "")
+                    "tool" -> ServerEvent.Tool(
+                        sid,
+                        part.str("callID") ?: part.str("id") ?: "",
+                        part.str("tool") ?: "",
+                        part.obj("state").str("status") ?: "",
+                    )
                     else -> ServerEvent.Other(sid, type)
                 }
             }
-            "session.tool.input.started" -> ServerEvent.Tool(sid, payload.str("name") ?: "", "running")
-            "session.tool.called" -> ServerEvent.Tool(sid, "", "running")
-            "session.tool.success" -> ServerEvent.Tool(sid, "", "completed")
-            "session.tool.failed" -> ServerEvent.Tool(sid, "", "error")
+            "session.tool.input.started" -> ServerEvent.Tool(sid, "", payload.str("name") ?: "", "running")
+            "session.tool.called" -> ServerEvent.Tool(sid, "", "", "running")
+            "session.tool.success" -> ServerEvent.Tool(sid, "", "", "completed")
+            "session.tool.failed" -> ServerEvent.Tool(sid, "", "", "error")
             "permission.asked", "permission.v2.asked", "permission.replied", "permission.v2.replied" ->
                 ServerEvent.Permission(sid)
+            "question.asked", "question.v2.asked", "question.replied", "question.rejected",
+            "question.v2.replied", "question.v2.rejected" ->
+                ServerEvent.Question(sid)
             "session.error" -> ServerEvent.Error(
                 sid,
                 payload.obj("error").str("message") ?: payload.str("error") ?: "error",
@@ -459,6 +467,52 @@ class OpenCodeClient(
     suspend fun replyPermission(sessionId: String, requestId: String, reply: String) {
         val body = buildJsonObject { put("reply", reply) }
         call(postReq("/api/session/$sessionId/permission/$requestId/reply", body.toString()))
+    }
+
+    // --------------------------------------------------- question (question tool)
+
+    private fun parseQuestion(item: JsonElement): QuestionRequest? {
+        val o = item as? JsonObject ?: return null
+        val id = o.str("id") ?: return null
+        val questions = o.arr("questions").mapNotNull { q ->
+            val qo = q as? JsonObject ?: return@mapNotNull null
+            QuestionInfo(
+                header = qo.str("header") ?: "",
+                question = qo.str("question") ?: "",
+                options = qo.arr("options").mapNotNull { op ->
+                    val oo = op as? JsonObject ?: return@mapNotNull null
+                    val label = oo.str("label") ?: return@mapNotNull null
+                    QuestionOption(label, oo.str("description") ?: "")
+                },
+                multiple = (qo["multiple"] as? JsonPrimitive)?.booleanOrNull == true,
+                custom = (qo["custom"] as? JsonPrimitive)?.booleanOrNull != false,
+            )
+        }
+        return QuestionRequest(id, questions)
+    }
+
+    /** Pertanyaan agent yang menunggu jawaban di sesi ini. */
+    suspend fun listQuestions(sessionId: String): List<QuestionRequest> = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq("/api/session/$sessionId/question")) }.getOrNull()
+            ?: return@withContext emptyList()
+        val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
+        data.mapNotNull { parseQuestion(it) }
+    }
+
+    /** Jawab pertanyaan: `answers[q]` = daftar label terpilih untuk pertanyaan ke-q. */
+    suspend fun replyQuestion(sessionId: String, requestId: String, answers: List<List<String>>) {
+        val body = buildJsonObject {
+            put(
+                "answers",
+                JsonArray(answers.map { a -> JsonArray(a.map { JsonPrimitive(it) }) }),
+            )
+        }
+        call(postReq("/api/session/$sessionId/question/$requestId/reply", body.toString()))
+    }
+
+    /** Tolak/tutup pertanyaan tanpa menjawab. */
+    suspend fun rejectQuestion(sessionId: String, requestId: String) {
+        runCatching { call(postReq("/api/session/$sessionId/question/$requestId/reject", null)) }
     }
 
     /** Ganti model sesi (server-side; pengganti pin model Arka). */

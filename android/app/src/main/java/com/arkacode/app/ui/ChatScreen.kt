@@ -38,11 +38,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,8 +94,10 @@ import com.arkacode.app.net.CommandInfo
 import com.arkacode.app.net.ModelRef
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.PermissionReq
+import com.arkacode.app.net.QuestionRequest
 import com.arkacode.app.net.RevertState
 import com.arkacode.app.net.SkillInfo
+import com.arkacode.app.net.ToolUse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,8 +131,10 @@ fun ChatScreen(
     val pending by run.pending
     val liveText by run.liveText
     val liveReasoning by run.liveReasoning
+    val liveTools by run.liveTools
     val toolLabel by run.toolLabel
     val justSent by run.justSent
+    val questions by run.questions
 
     var input by remember { mutableStateOf("") }
     var pinnedModel by remember { mutableStateOf<ModelRef?>(null) }
@@ -189,8 +196,13 @@ fun ChatScreen(
         val args = rest.substringAfter(' ', "").split(' ', '\n', '\t').filter { it.isNotBlank() }
         commands.firstOrNull { it.name == name }?.let { return promptForCommand(name, args) }
         skills.firstOrNull { it.name == name }?.let { return promptForSkill(it) }
+        if (name == "ringkas" || name == "compact") return I18n.s.compactPrompt
         return null
     }
+
+    /** Command sisi klien (di luar daftar server). */
+    val slashCommands = commands.filter { it.name.lowercase() !in setOf("ringkas", "compact") } +
+        CommandInfo("ringkas", I18n.s.compactCommandDesc, null)
 
     fun send(text: String) {
         val resolved = resolveSlash(text.trim()) ?: text
@@ -248,12 +260,7 @@ fun ChatScreen(
                 onOpenCommands = { menuOpen = false; showCommands = true },
                 onCompact = {
                     menuOpen = false
-                    scope.launch {
-                        run.error.value = null
-                        runCatching { client.compactSession(sessionId) }
-                            .onFailure { run.error.value = it.message ?: I18n.s.compactFail }
-                        refreshAll()
-                    }
+                    runPromptText(I18n.s.compactPrompt)
                 },
                 onRevert = {
                     menuOpen = false
@@ -267,7 +274,7 @@ fun ChatScreen(
                     input = input,
                     onInputChange = { input = it },
                     busy = busy,
-                    commands = commands,
+                    commands = slashCommands,
                     skills = skills,
                     attachments = attachments,
                     onAttach = { attachPicker.launch(arrayOf("*/*")) },
@@ -370,6 +377,13 @@ fun ChatScreen(
                             }
                         }
                     }
+                    if (liveTools.isNotEmpty()) {
+                        item("live-tools") {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                liveTools.forEach { t -> LiveToolCard(t) }
+                            }
+                        }
+                    }
                 }
             }
             }
@@ -386,6 +400,25 @@ fun ChatScreen(
                 }
             },
             onDismiss = { /* tetap tampil selama masih pending */ },
+        )
+    }
+
+    questions.firstOrNull()?.let { req ->
+        QuestionSheet(
+            request = req,
+            onReply = { answers ->
+                scope.launch {
+                    runCatching { client.replyQuestion(sessionId, req.id, answers) }
+                    registry.refresh(sessionId)
+                }
+            },
+            onReject = {
+                scope.launch {
+                    runCatching { client.rejectQuestion(sessionId, req.id) }
+                    registry.refresh(sessionId)
+                }
+            },
+            onDismiss = { /* tetap tampil selama masih menunggu jawaban */ },
         )
     }
 
@@ -837,6 +870,166 @@ private fun ApprovalSheet(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Kartu status tool yang sedang berjalan/menunggu (dari SSE). */
+@Composable
+private fun LiveToolCard(tool: ToolUse) {
+    val running = tool.status == "running" || tool.status == "pending" || tool.status.isBlank()
+    ClayCard(contentPadding = PaddingValues(0.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (running) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Text(
+                tool.name,
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            Text(tool.status.ifBlank { I18n.s.working }, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuestionSheet(
+    request: QuestionRequest,
+    onReply: (List<List<String>>) -> Unit,
+    onReject: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val size = request.questions.size
+    var selected by remember(request.id) { mutableStateOf(List(size) { emptyList<String>() }) }
+    var typed by remember(request.id) { mutableStateOf(List(size) { "" }) }
+
+    fun toggle(qi: Int, label: String, multiple: Boolean) {
+        val cur = selected[qi]
+        val next = if (multiple) {
+            if (cur.contains(label)) cur - label else cur + label
+        } else {
+            listOf(label)
+        }
+        selected = selected.toMutableList().also { it[qi] = next }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                I18n.s.questionTitle(size),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            request.questions.forEachIndexed { qi, q ->
+                ClayCard(contentPadding = PaddingValues(0.dp)) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (q.header.isNotBlank()) ClaySectionTitle(q.header)
+                        Text(q.question, style = MaterialTheme.typography.bodyMedium)
+                        if (q.multiple) {
+                            Text(
+                                I18n.s.multipleHint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val picked = selected.getOrElse(qi) { emptyList() }
+                        q.options.forEach { opt ->
+                            val isOn = picked.contains(opt.label)
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(ClayShapeSmall)
+                                    .background(
+                                        if (isOn) MaterialTheme.colorScheme.primaryContainer
+                                        else Color.Transparent,
+                                    )
+                                    .clickable { toggle(qi, opt.label, q.multiple) }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    if (isOn) Icons.Default.Check else Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = if (isOn) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(opt.label, style = MaterialTheme.typography.bodyMedium)
+                                    if (opt.description.isNotBlank()) {
+                                        Text(
+                                            opt.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (q.custom) {
+                            OutlinedTextField(
+                                value = typed.getOrElse(qi) { "" },
+                                onValueChange = { v ->
+                                    typed = typed.toMutableList().also { it[qi] = v }
+                                },
+                                placeholder = { Text(I18n.s.ownAnswer) },
+                                singleLine = false,
+                                maxLines = 3,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(onClick = onReject, modifier = Modifier.weight(1f)) {
+                    Text(I18n.s.rejectQuestion, color = MaterialTheme.colorScheme.error)
+                }
+                Button(
+                    onClick = {
+                        val answers = request.questions.indices.map { qi ->
+                            val list = selected[qi].toMutableList()
+                            val t = typed[qi].trim()
+                            if (t.isNotEmpty() && !list.contains(t)) list.add(t)
+                            list
+                        }
+                        onReply(answers)
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(I18n.s.submitAnswers) }
             }
         }
     }
