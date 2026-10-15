@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arkacode — Claymorphism Biru Muda · Styleguide</title>
+<style>
+  :root {
+    --accent: #5B9BE0;
+    --accent-deep: #143A5C;
+    --pale: #D6E8FB;
+    --bg: #EAF4FF;
+    --surface: #F5FAFF;
+    --card: #FFFFFF;
+    --card-bottom: #F1F7FE;
+    --ink: #27415F;
+    --ink-2: #566B85;
+    --outline: #C2DCF4;
+    --variant: #DCEBFC;
+    --tertiary: #2FA37C;
+    --shadow-amb: rgba(91, 155, 224, 0.14);
+    --shadow-spot: rgba(91, 155, 224, 0.28);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  h2 { font-size: 18px; margin: 40px 0 14px; color: var(--ink); }
+  .sub { color: var(--ink-2); margin: 0 0 8px; }
+  .tagline { color: var(--ink-2); font-size: 14px; }
+
+  .clay {
+    background: linear-gradient(180deg, var(--card), var(--card-bottom));
+    border-radius: 24px;
+    box-shadow: 0 14px 24px -6px var(--shadow-spot), 0 6px 14px -6px var(--shadow-amb);
+  }
+  .clay-sm {
+    background: linear-gradient(180deg, var(--card), var(--card-bottom));
+    border-radius: 16px;
+    box-shadow: 0 8px 16px -6px var(--shadow-spot), 0 4px 10px -6px var(--shadow-amb);
+  }
+  .panel { padding: 20px; }
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 760px){ .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+  .sw { border-radius: 16px; overflow: hidden; box-shadow: 0 4px 10px -4px rgba(39,65,95,0.25); }
+  .sw .chip { height: 56px; }
+  .sw .meta { padding: 8px 10px; background: #fff; font-size: 11px; line-height: 1.35; }
+  .sw .name { font-weight: 600; color: var(--ink); }
+  .sw .hex { color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .pill {
+    border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 500;
+    background: var(--variant); color: var(--ink-2); border: none;
+  }
+  .pill.on { background: var(--accent); color: #fff; font-weight: 600;
+    box-shadow: 0 6px 12px -4px var(--shadow-spot); }
+  .badge {
+    border-radius: 999px; padding: 4px 12px; font-size: 11px; font-weight: 600;
+    background: var(--pale); color: var(--accent-deep);
+  }
+  .iconbadge {
+    width: 40px; height: 40px; border-radius: 999px; background: var(--pale);
+    display: grid; place-items: center; color: var(--accent); font-size: 18px;
+  }
+  .btn-primary {
+    background: var(--accent); color: #fff; border: none; border-radius: 16px;
+    padding: 12px 18px; font-weight: 600; font-size: 14px;
+    box-shadow: 0 10px 18px -6px var(--shadow-spot);
+  }
+  .send {
+    width: 52px; height: 52px; border-radius: 999px; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: 20px; border: none;
+    box-shadow: 0 10px 18px -6px var(--shadow-spot);
+  }
+  .input {
+    background: linear-gradient(180deg, var(--card), var(--card-bottom));
+    border-radius: 28px; padding: 14px 18px; color: var(--ink-2); font-size: 14px;
+    box-shadow: 0 10px 18px -8px var(--shadow-spot);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .input .grow { flex: 1; }
+
+  .bubble-user {
+    background: var(--pale); color: var(--accent-deep);
+    border-radius: 20px 20px 6px 20px; padding: 12px 14px; font-size: 14px;
+    box-shadow: 0 8px 14px -6px var(--shadow-spot);
+    max-width: 82%;
+  }
+  .bubble-ai {
+    background: linear-gradient(180deg, var(--card), var(--card-bottom)); color: var(--ink);
+    border-radius: 6px 20px 20px 20px; padding: 12px 14px; font-size: 14px;
+    box-shadow: 0 8px 14px -6px var(--shadow-amb);
+    max-width: 95%;
+  }
+
+  .navbar {
+    display: flex; gap: 6px; padding: 8px;
+    border-radius: 28px; background: linear-gradient(180deg, var(--card), var(--card-bottom));
+    box-shadow: 0 18px 26px -8px var(--shadow-spot);
+  }
+  .navitem {
+    flex: 1; text-align: center; padding: 10px 4px; border-radius: 12px; color: var(--ink-2);
+    font-size: 11px;
+  }
+  .navitem.on { background: var(--pale); color: var(--accent); font-weight: 600; }
+  .navitem .ico { font-size: 20px; display: block; margin-bottom: 3px; }
+
+  .header { display: flex; align-items: center; gap: 12px; }
+  .header .ttl { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  .header .sub { font-size: 12px; color: var(--ink-2); }
+
+  .list-item { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+  .list-item .grow { flex: 1; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; font-weight: 600; }
+  .muted { color: var(--ink-2); font-size: 12px; }
+
+  /* Dark preview */
+  .dark {
+    --card: #17263A; --card-bottom: #121E2D; --bg: #0D1724; --surface: #121D2C;
+    --ink: #DCE8F6; --ink-2: #A9C2DA; --pale: #1D4266; --accent-deep: #D6EBFF;
+    --accent: #8FC3FF; --variant: #22334A; --outline: #2A3C52; --tertiary: #5FCE9E;
+    --shadow-amb: rgba(143,195,255,0.10); --shadow-spot: rgba(143,195,255,0.22);
+    background: var(--bg); color: var(--ink); border-radius: 24px; padding: 20px;
+  }
+  .dark .sw .meta { background: #17263A; }
+  .dark h2 { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Arkacode</h1>
+  <p class="tagline">Styleguide claymorphism biru muda — <code>com.arkacode.app</code></p>
+  <p class="sub">Referensi visual untuk fase GAN design. Sumber kebenaran kode: <code>ui/theme/Theme.kt</code> (palet) &amp; <code>ui/theme/Clay.kt</code> (komponen).</p>
+
+  <h2>Palet — terang</h2>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#5B9BE0"></div><div class="meta"><div class="name">Accent / Primary</div><div class="hex">#5B9BE0</div></div></div>
+    <div class="sw"><div class="chip" style="background:#D6E8FB"></div><div class="meta"><div class="name">Primary Container</div><div class="hex">#D6E8FB</div></div></div>
+    <div class="sw"><div class="chip" style="background:#EAF4FF"></div><div class="meta"><div class="name">Background</div><div class="hex">#EAF4FF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#F5FAFF"></div><div class="meta"><div class="name">Surface</div><div class="hex">#F5FAFF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#FFFFFF"></div><div class="meta"><div class="name">Card</div><div class="hex">#FFFFFF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#DCEBFC"></div><div class="meta"><div class="name">Surface Variant</div><div class="hex">#DCEBFC</div></div></div>
+    <div class="sw"><div class="chip" style="background:#27415F"></div><div class="meta"><div class="name">Ink</div><div class="hex">#27415F</div></div></div>
+    <div class="sw"><div class="chip" style="background:#566B85"></div><div class="meta"><div class="name">Ink Secondary</div><div class="hex">#566B85</div></div></div>
+    <div class="sw"><div class="chip" style="background:#C2DCF4"></div><div class="meta"><div class="name">Outline</div><div class="hex">#C2DCF4</div></div></div>
+    <div class="sw"><div class="chip" style="background:#2FA37C"></div><div class="meta"><div class="name">Tertiary</div><div class="hex">#2FA37C</div></div></div>
+  </div>
+
+  <h2>Komponen</h2>
+  <div class="grid cols-3">
+    <div class="clay panel">
+      <div class="header"><div class="iconbadge">&#9881;</div>
+        <div><div class="ttl" style="font-size:18px">Header</div><div class="sub">judul + subjudul</div></div>
+      </div>
+    </div>
+    <div class="clay panel">
+      <div class="row"><button class="pill on">Chat</button><button class="pill">Files</button><button class="pill">Skills</button></div>
+      <div style="height:8px"></div>
+      <div class="row"><span class="badge">plan</span><span class="badge">build</span><span class="badge">free</span></div>
+    </div>
+    <div class="clay panel">
+      <div class="row"><button class="btn-primary">Pakai</button>
+        <div style="flex:1"></div><button class="send">&#10148;</button></div>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:16px">
+    <div class="clay-sm panel">
+      <div class="list-item" style="padding:0">
+        <div class="iconbadge" style="background:var(--variant)">&#9783;</div>
+        <div class="grow"><div class="mono">ses_ec09cd…</div><div class="muted">judul sesi</div></div>
+        <span class="muted">ren</span>
+      </div>
+    </div>
+    <div class="clay-sm panel">
+      <div class="list-item" style="padding:0">
+        <div class="iconbadge" style="background:var(--variant)">&#10024;</div>
+        <div class="grow"><div class="mono">/git-workflow</div><div class="muted">Jalankan skill</div></div>
+        <span class="badge">skill</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>Chat</h2>
+  <div class="grid" style="gap:10px">
+    <div class="bubble-ai">Halo! Mau bikin apa hari ini? Saya bisa jalankan perintah, skill, dan kelola berkas.</div>
+    <div class="row" style="justify-content:flex-end"><div class="bubble-user">Tolong buat fitur login multi-user</div></div>
+    <div class="input"><span class="grow">Tulis pesan…</span><button class="send">&#10148;</button></div>
+  </div>
+
+  <h2>Bottom navigation (clay)</h2>
+  <div class="navbar" style="max-width:520px">
+    <div class="navitem on"><span class="ico">&#9776;</span>Sesi</div>
+    <div class="navitem"><span class="ico">&#129302;</span>AI</div>
+    <div class="navitem"><span class="ico">&#128295;</span>Kapabilitas</div>
+  </div>
+
+  <h2>Mode gelap</h2>
+  <div class="dark">
+    <div class="grid cols-3">
+      <div class="clay panel">
+        <div class="header"><div class="iconbadge">&#127769;</div>
+          <div><div class="ttl" style="font-size:18px">Header</div><div class="sub">navy laut dalam</div></div>
+        </div>
+      </div>
+      <div class="clay panel">
+        <div class="row"><button class="pill on">Chat</button><button class="pill">Files</button></div>
+        <div style="height:8px"></div>
+        <div class="badge">accent #8FC3FF</div>
+      </div>
+      <div class="clay panel"><button class="send">&#10148;</button></div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="navbar">
+      <div class="navitem on"><span class="ico">&#9776;</span>Sesi</div>
+      <div class="navitem"><span class="ico">&#129302;</span>AI</div>
+      <div class="navitem"><span class="ico">&#128295;</span>Kapabilitas</div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="bubble-ai">Bubble asisten memakai permukaan clay navy.</div>
+  </div>
+
+  <h2>Catatan apply di Android</h2>
+  <div class="clay panel">
+    <ul style="margin:0; padding-left:18px; line-height:1.9; font-size:14px">
+      <li><b>Theme.kt</b> — palet <code>ClayLight</code>/<code>ClayDark</code>, <code>ClayCard</code> (gradien puffy + shadow bertinta biru), token bentuk.</li>
+      <li><b>Clay.kt</b> — <code>ClaySurface</code>, <code>ClayBottomBar</code>, <code>ClayPill</code>, <code>ClayIconBadge</code>, <code>ClayHeader</code>, <code>ClaySectionTitle</code>.</li>
+      <li><b>EngineScreen</b> — bottom nav clay + header clay + kartu form.</li>
+      <li><b>ChatScreen</b> — top bar clay, input pill mengambang, tombol kirim bulat, bubble berbayang, tab pill.</li>
+      <li><b>Providers / Capabilities</b> — top bar clay, tab pill, badge tag.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

@@ -115,7 +115,11 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            ClaySurface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+                elevation = 10.dp,
+            ) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -128,7 +132,8 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                     }
                     Text(
                         I18n.s.providersTitle,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
                 }

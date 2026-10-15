@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,6 +63,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -256,15 +262,15 @@ fun ChatScreen(
                     .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                FilterChip(
+                ClayPill(
+                    text = I18n.s.chatTab,
                     selected = !showFilesTab,
                     onClick = { showFilesTab = false },
-                    label = { Text(I18n.s.chatTab) },
                 )
-                FilterChip(
+                ClayPill(
+                    text = I18n.s.filesTab,
                     selected = showFilesTab,
                     onClick = { showFilesTab = true },
-                    label = { Text(I18n.s.filesTab) },
                 )
             }
             if (showFilesTab) {
@@ -422,7 +428,10 @@ private fun ChatBar(
     onCompact: () -> Unit,
     onRevert: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
+    ClaySurface(
+        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+        elevation = 10.dp,
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -489,37 +498,71 @@ private fun ChatInput(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedTextField(
-            value = input,
-            onValueChange = onInputChange,
-            placeholder = { Text(I18n.s.writeMessage) },
-            singleLine = false,
-            minLines = 1,
-            maxLines = 5,
+        ClaySurface(
             modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        if (busy) {
-            IconButton(onClick = onStop) {
-                Icon(Icons.Default.Stop, contentDescription = I18n.s.stop)
-            }
-        } else {
-            IconButton(onClick = onSend, enabled = input.isNotBlank()) {
-                Icon(Icons.Default.Send, contentDescription = I18n.s.send)
-            }
+            shape = ClayShapeLarge,
+            elevation = 10.dp,
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInputChange,
+                placeholder = { Text(I18n.s.writeMessage) },
+                singleLine = false,
+                minLines = 1,
+                maxLines = 5,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        val accent = if (busy) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary
+        val accentInk = if (busy) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
+        Box(
+            Modifier
+                .size(52.dp)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = ClayShapePill,
+                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
+                )
+                .clip(ClayShapePill)
+                .background(accent)
+                .clickable(enabled = busy || input.isNotBlank()) { if (busy) onStop() else onSend() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (busy) Icons.Default.Stop else Icons.Default.Send,
+                contentDescription = if (busy) I18n.s.stop else I18n.s.send,
+                tint = accentInk,
+                modifier = Modifier.size(22.dp),
+            )
         }
     }
 }
 
 @Composable
 private fun UserBubble(item: ChatItem.User, onRevert: () -> Unit) {
+    val shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-            modifier = Modifier.clip(RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)),
+            shape = shape,
+            modifier = Modifier
+                .shadow(
+                    elevation = 8.dp,
+                    shape = shape,
+                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                )
+                .clip(shape),
         ) {
             Column(Modifier.padding(12.dp, 8.dp)) {
                 Text(item.text, style = MaterialTheme.typography.bodyMedium)
@@ -541,11 +584,20 @@ private fun UserBubble(item: ChatItem.User, onRevert: () -> Unit) {
 private fun AssistantBubble(item: ChatItem.Assistant) {
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
-            modifier = Modifier.fillMaxWidth(0.95f),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = shape,
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = shape,
+                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                )
+                .clip(shape),
         ) {
             Column(Modifier.padding(12.dp, 8.dp)) {
                 item.error?.let { err ->
