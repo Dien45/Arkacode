@@ -117,6 +117,7 @@ fun ChatScreen(
     var liveReasoning by remember { mutableStateOf("") }
     var toolLabel by remember { mutableStateOf<String?>(null) }
     var refreshJob by remember { mutableStateOf<Job?>(null) }
+    var justSent by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshAll() {
         messages = runCatching { client.listMessages(sessionId) }.getOrDefault(messages)
@@ -143,6 +144,7 @@ fun ChatScreen(
         liveText = ""
         liveReasoning = ""
         toolLabel = null
+        justSent = null
     }
 
     fun send(text: String) {
@@ -151,11 +153,13 @@ fun ChatScreen(
         error = null
         busy = true
         input = ""
+        justSent = trimmed
         liveText = ""
         liveReasoning = ""
         toolLabel = null
         pollJob?.cancel()
         waitJob?.cancel()
+        val preCount = messages.size
         pollJob = scope.launch {
             try {
                 pinnedModel?.let { m ->
@@ -176,7 +180,17 @@ fun ChatScreen(
         }
         waitJob = scope.launch {
             try {
-                client.waitIdle(sessionId)
+                // Kalau `wait` balik sebelum turn benar-benar mulai (race),
+                // ulangi sampai ada pesan baru — jangan berhenti menonton dini.
+                var attempts = 0
+                while (attempts < 3) {
+                    client.waitIdle(sessionId)
+                    val grew = messages.size > preCount ||
+                        messages.any { it is ChatItem.User && it.text == trimmed }
+                    if (grew) break
+                    attempts++
+                    delay(800)
+                }
                 pollJob?.cancel()
                 refreshAll()
             } catch (e: CancellationException) {
@@ -186,6 +200,7 @@ fun ChatScreen(
             } finally {
                 pollJob?.cancel()
                 busy = false
+                justSent = null
             }
         }
     }
@@ -361,6 +376,12 @@ fun ChatScreen(
                         is ChatItem.User -> UserBubble(item, onRevert = { openRevert(item.id) })
                         is ChatItem.Assistant -> AssistantBubble(item)
                         is ChatItem.Note -> NoteRow(item)
+                    }
+                }
+                val echo = justSent
+                if (busy && echo != null && messages.none { it is ChatItem.User && it.text == echo }) {
+                    item("echo") {
+                        UserBubble(ChatItem.User("__echo__", echo, 0), onRevert = {})
                     }
                 }
                 if (busy) {
