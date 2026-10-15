@@ -356,8 +356,12 @@ class OpenCodeClient(
                         }
                     }
                 }
-                if (texts.isEmpty() && reasonings.isEmpty() && tools.isEmpty()) null
-                else ChatItem.Assistant(id, texts, reasonings, tools)
+                val finish = o.str("finish")
+                val err = o.obj("error").str("message")?.takeIf { it.isNotBlank() }
+                    ?: o.str("error")?.takeIf { it.isNotBlank() }
+                val hasBody = texts.isNotEmpty() || reasonings.isNotEmpty() || tools.isNotEmpty()
+                if (!hasBody && err == null && finish == null) null
+                else ChatItem.Assistant(id, texts, reasonings, tools, finish, err)
             }
             "synthetic", "system" -> {
                 val text = o.str("text") ?: o.str("description") ?: return null
