@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -29,8 +30,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -251,32 +250,36 @@ fun EngineScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(I18n.s.stoppedTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                OutlinedTextField(
-                    value = port.toString(),
-                    onValueChange = { port = it.filter(Char::isDigit).take(5).toIntOrNull() ?: port },
-                    label = { Text(I18n.s.port) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text(I18n.s.serverPassword) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = {
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                runCatching { com.arkacode.app.core.SecureStore.save(context, port, password) }
+                ClayHeader(title = I18n.s.stoppedTitle, leading = { ClayIconBadge(Icons.Default.Build) })
+                ClayCard {
+                    OutlinedTextField(
+                        value = port.toString(),
+                        onValueChange = { port = it.filter(Char::isDigit).take(5).toIntOrNull() ?: port },
+                        label = { Text(I18n.s.port) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text(I18n.s.serverPassword) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runCatching { com.arkacode.app.core.SecureStore.save(context, port, password) }
+                                }
+                                screen = Screen.Boot(0)
                             }
-                            screen = Screen.Boot(0)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(I18n.s.saveStart) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(I18n.s.saveStart) }
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -312,15 +315,13 @@ private fun BootScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                I18n.s.preparing,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
-            if (working) CircularProgressIndicator()
-        }
+        ClayHeader(
+            title = I18n.s.preparing,
+            leading = { ClayIconBadge(Icons.Default.Build) },
+            actions = {
+                if (working) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            },
+        )
         if (working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         failMsg?.let {
             Text(I18n.s.failedPrefix + it, color = MaterialTheme.colorScheme.error)
@@ -393,27 +394,19 @@ private fun ReadyScreen(
             .padding(start = 16.dp, end = 16.dp, top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.statusBars),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(I18n.s.appName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    I18n.s.tagline(version, port),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            TextButton(onClick = {
-                I18n.lang = if (I18n.lang == AppLang.ID) AppLang.EN else AppLang.ID
-                scope.launch { runCatching { uiPrefs.setLangCode(I18n.lang.code) } }
-            }) { Text(if (I18n.lang == AppLang.ID) "EN" else "ID") }
-            TextButton(onClick = onToggleTheme) { Text(if (isDark) "\u2600\uFE0F" else "\uD83C\uDF19") }
-            OutlinedButton(onClick = onStop) { Text(I18n.s.stop) }
-        }
+        ClayHeader(
+            title = I18n.s.appName,
+            subtitle = I18n.s.tagline(version, port),
+            modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+            actions = {
+                TextButton(onClick = {
+                    I18n.lang = if (I18n.lang == AppLang.ID) AppLang.EN else AppLang.ID
+                    scope.launch { runCatching { uiPrefs.setLangCode(I18n.lang.code) } }
+                }) { Text(if (I18n.lang == AppLang.ID) "EN" else "ID") }
+                TextButton(onClick = onToggleTheme) { Text(if (isDark) "\u2600\uFE0F" else "\uD83C\uDF19") }
+                OutlinedButton(onClick = onStop) { Text(I18n.s.stop) }
+            },
+        )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(I18n.s.sessionsCount(sessions?.size ?: 0), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
 
@@ -478,27 +471,14 @@ private fun ReadyScreen(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        NavigationBar {
-            NavigationBarItem(
-                selected = true,
-                onClick = {},
-                icon = { Icon(Icons.Default.List, contentDescription = null) },
-                label = { Text(I18n.s.navSessions) },
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = onOpenProviders,
-                icon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
-                label = { Text(I18n.s.navAI) },
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = onOpenCapabilities,
-                icon = { Icon(Icons.Default.Build, contentDescription = null) },
-                label = { Text(I18n.s.navCaps) },
-            )
-        }
+        Spacer(Modifier.height(4.dp))
+        ClayBottomBar(
+            items = listOf(
+                ClayNavItem(Icons.Default.List, I18n.s.navSessions, selected = true, onClick = {}),
+                ClayNavItem(Icons.Default.SmartToy, I18n.s.navAI, selected = false, onClick = onOpenProviders),
+                ClayNavItem(Icons.Default.Build, I18n.s.navCaps, selected = false, onClick = onOpenCapabilities),
+            ),
+        )
     }
 
     renameTarget?.let { target ->

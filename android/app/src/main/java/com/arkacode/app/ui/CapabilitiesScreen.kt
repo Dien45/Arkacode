@@ -1,6 +1,8 @@
 package com.arkacode.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,22 +68,17 @@ fun CapabilitiesScreen(
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
+            ClayHeader(
+                title = I18n.s.capsTitle,
+                modifier = Modifier
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = I18n.s.back)
-                }
-                Text(
-                    I18n.s.capsTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                leading = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = I18n.s.back)
+                    }
+                },
+            )
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -88,10 +86,10 @@ fun CapabilitiesScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 CapsTab.entries.forEach { t ->
-                    FilterChip(
+                    ClayPill(
+                        text = if (t == CapsTab.Agents) I18n.s.tabAgents else if (t == CapsTab.Commands) I18n.s.tabCommands else I18n.s.tabSkills,
                         selected = tab == t,
                         onClick = { tab = t },
-                        label = { Text(if (t == CapsTab.Agents) I18n.s.tabAgents else if (t == CapsTab.Commands) I18n.s.tabCommands else I18n.s.tabSkills) },
                     )
                 }
             }
@@ -179,7 +177,18 @@ private fun CapsRow(title: String, subtitle: String, tag: String?) {
                 }
             }
             tag?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall)
+                Box(
+                    Modifier
+                        .clip(ClayShapePill)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
             }
         }
     }
