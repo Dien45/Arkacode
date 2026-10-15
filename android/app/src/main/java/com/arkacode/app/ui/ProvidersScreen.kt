@@ -1,6 +1,8 @@
 package com.arkacode.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.OpenCodeConfig
 import com.arkacode.app.core.SecureStore
 import com.arkacode.app.net.ModelInfo
 import com.arkacode.app.net.OpenCodeClient
@@ -88,6 +92,9 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var showIntegrations by remember { mutableStateOf(false) }
+    var custom by remember { mutableStateOf(listOf<OpenCodeConfig.CustomProvider>()) }
+    var distroReady by remember { mutableStateOf(true) }
+    var showAddCustom by remember { mutableStateOf(false) }
 
     fun load() {
         loading = true
@@ -107,7 +114,28 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                     if (!has.isNullOrBlank()) p.id else null
                 }.toSet()
             }
+            distroReady = withContext(Dispatchers.IO) { OpenCodeConfig.isAvailable(context) }
+            custom = withContext(Dispatchers.IO) {
+                runCatching { OpenCodeConfig.listCustom(context) }.getOrDefault(emptyList())
+            }
             loading = false
+        }
+    }
+
+    fun saveCustom(name: String, baseUrl: String, modelsCsv: String, apiKey: String) {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val id = OpenCodeConfig.makeId(name, OpenCodeConfig.existingIds(context))
+                val models = modelsCsv.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+                OpenCodeConfig.upsert(context, id, name, baseUrl, models, newKey = apiKey.ifBlank { null })
+            }
+            custom = withContext(Dispatchers.IO) { OpenCodeConfig.listCustom(context) }
+            if (ok) {
+                showAddCustom = false
+                notice = I18n.s.customSavedNotice
+            } else {
+                notice = I18n.s.customSaveFailed
+            }
         }
     }
 
@@ -147,7 +175,7 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ClayCard(contentPadding = PaddingValues(0.dp)) {
+            ClayCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
                 Text(
                     I18n.s.providersHelp,
                     style = MaterialTheme.typography.bodySmall,
@@ -201,9 +229,88 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
             val list = providers ?: emptyList()
             val byProvider = models.groupBy { it.providerID }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                item(key = "custom-providers") {
+                    ClayCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    I18n.s.customProvidersTitle,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { showAddCustom = true }, enabled = distroReady) {
+                                    Text(I18n.s.customAdd)
+                                }
+                            }
+                            Text(
+                                I18n.s.customProvidersHelp,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (!distroReady) {
+                                Text(
+                                    I18n.s.customNeedDistro,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            if (custom.isEmpty()) {
+                                Text(
+                                    I18n.s.customEmpty,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                custom.forEach { p ->
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                p.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                            Text(
+                                                if (p.models.isEmpty()) p.baseUrl
+                                                else "${p.baseUrl}  ·  ${I18n.s.modelsCount(p.models.size)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                        if (p.hasKey) {
+                                            Text("🔑", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                val ok = withContext(Dispatchers.IO) {
+                                                    OpenCodeConfig.remove(context, p.id)
+                                                }
+                                                custom = withContext(Dispatchers.IO) {
+                                                    OpenCodeConfig.listCustom(context)
+                                                }
+                                                notice = if (ok) I18n.s.customDeletedNotice(p.name)
+                                                else I18n.s.customSaveFailed
+                                            }
+                                        }) { Text(I18n.s.deleteKey, color = MaterialTheme.colorScheme.error) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 items(list.distinctBy { it.id }, key = { it.id }) { p ->
                     val ms = byProvider[p.id] ?: emptyList()
-                    ClayCard(contentPadding = PaddingValues(0.dp)) {
+                    ClayCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
                         Column(Modifier.padding(10.dp)) {
                             Row(
                                 Modifier
@@ -307,4 +414,81 @@ fun ProvidersScreen(port: Int, password: String, onBack: () -> Unit) {
     if (showIntegrations) {
         IntegrationsSheet(port = port, password = password, onDismiss = { showIntegrations = false })
     }
+
+    if (showAddCustom) {
+        AddCustomProviderDialog(
+            onDismiss = { showAddCustom = false },
+            onSave = { name, baseUrl, models, apiKey -> saveCustom(name, baseUrl, models, apiKey) },
+        )
+    }
+}
+
+/** Form tambah provider OpenAI-compatible (ditulis ke opencode.json server). */
+@Composable
+private fun AddCustomProviderDialog(
+    onDismiss: () -> Unit,
+    onSave: (name: String, baseUrl: String, models: String, apiKey: String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
+    var models by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(I18n.s.customProvidersTitle) },
+        text = {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(I18n.s.customNameLabel) },
+                    placeholder = { Text("LM Studio") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text(I18n.s.customBaseUrlLabel) },
+                    placeholder = { Text("http://192.168.1.2:1234/v1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = models,
+                    onValueChange = { models = it },
+                    label = { Text(I18n.s.customModelsHintLabel) },
+                    placeholder = { Text(I18n.s.customModelsHint) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text(I18n.s.customApiKeyLabel) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                err?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (name.isBlank() || baseUrl.isBlank()) err = I18n.s.customInvalid
+                else onSave(name, baseUrl, models, apiKey)
+            }) { Text(I18n.s.saveKey) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(I18n.s.close) }
+        },
+    )
 }
