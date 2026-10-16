@@ -10,7 +10,7 @@ serialization = "1.8.0"
 securityCrypto = "1.1.0-alpha06"
 datastore = "1.1.1"
 commonsCompress = "1.27.1"
-androidxWebkit = "1.10.0"
+androidxWebkit = "1.8.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
