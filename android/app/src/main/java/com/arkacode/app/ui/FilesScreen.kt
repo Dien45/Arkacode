@@ -21,10 +21,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,8 +55,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.fileLeafName
 import com.arkacode.app.core.ArenaDownloadBridge
+import com.arkacode.app.core.StorageAccess
 import com.arkacode.app.net.FsEntry
 import com.arkacode.app.net.OpenCodeClient
+import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -79,6 +84,18 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
     var openedText by remember { mutableStateOf<String?>(null) }
     var openedBytes by remember { mutableStateOf<ByteArray?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var hasStorage by remember { mutableStateOf(StorageAccess.hasAllFilesAccess()) }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasStorage = StorageAccess.hasAllFilesAccess()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun loadDir(dir: String) {
         job?.cancel()
@@ -93,6 +110,61 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                 }
             }.onFailure { error = it.message }.getOrNull()
             loading = false
+        }
+    }
+
+    fun toast(msg: String) {
+        android.widget.Toast.makeText(filesContext, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    fun runImport() {
+        if (!StorageAccess.hasAllFilesAccess()) {
+            toast(I18n.s.arenaAccessNeeded)
+            filesContext.startActivity(StorageAccess.requestAllFilesAccess(filesContext))
+            return
+        }
+        scope.launch {
+            val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ArenaDownloadBridge.importDownloadsToWorkspace(
+                    downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    workspaceDir = File(filesContext.filesDir, "workspace"),
+                )
+            }
+            toast(
+                if (summary.changed) {
+                    I18n.s.arenaImportResult(summary.copied, summary.extractedFiles)
+                } else {
+                    I18n.s.arenaImportEmpty
+                }
+            )
+            if (summary.changed) loadDir(cwd)
+        }
+    }
+
+    val zipPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val input = filesContext.contentResolver.openInputStream(uri)
+                        ?: return@runCatching null
+                    ArenaDownloadBridge.importZipStream(
+                        input = input,
+                        workspaceDir = File(filesContext.filesDir, "workspace"),
+                        tmpDir = filesContext.cacheDir,
+                    )
+                }.getOrNull()
+            }
+            if (result != null && result.files > 0) {
+                toast(I18n.s.arenaImportResult(0, result.files))
+                loadDir(cwd)
+            } else {
+                toast(I18n.s.arenaImportEmpty)
+            }
         }
     }
 
@@ -149,6 +221,31 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
 
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth()) {
+            if (!hasStorage) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        I18n.s.arenaFilesAccessHelp,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        filesContext.startActivity(StorageAccess.requestAllFilesAccess(filesContext))
+                    }) {
+                        Text(I18n.s.arenaGrantFilesAccess)
+                    }
+                }
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -172,40 +269,20 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     Icon(Icons.Default.Refresh, contentDescription = I18n.s.reloadFiles)
                 }
                 if (openedPath == null) {
-                    IconButton(onClick = {
-                        scope.launch {
-                            val imported = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                ArenaDownloadBridge.importDownloadsToWorkspace(
-                                    context = filesContext,
-                                    filesDirFolder = filesContext.filesDir,
-                                    projectName = "default",
-                                )
-                            }
-                            if (imported > 0) loadDir(cwd)
-                        }
-                    }) {
+                    IconButton(onClick = { runImport() }) {
                         Icon(
                             Icons.Default.Save,
                             contentDescription = I18n.s.arenaImportDownloads,
                         )
                     }
                 }
-                IconButton(onClick = {
-                    val count = ArenaDownloadBridge.importDownloadsToWorkspace(
-                        filesContext,
-                        filesContext.filesDir,
-                        "default"
-                    )
-                    scope.launch {
-                        android.widget.Toast.makeText(
-                            filesContext,
-                            I18n.s.arenaImported(count),
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    loadDir(cwd)
-                }) {
+                IconButton(onClick = { runImport() }) {
                     Icon(Icons.Default.Download, contentDescription = I18n.s.arenaImportDownloads)
+                }
+                if (openedPath == null) {
+                    IconButton(onClick = { zipPicker.launch(arrayOf("application/zip", "application/octet-stream")) }) {
+                        Icon(Icons.Default.Add, contentDescription = I18n.s.arenaPickZip)
+                    }
                 }
             }
             if (openedPath == null) {
