@@ -68,7 +68,7 @@ fun ArenaWebView() {
             // Cookie agar login Arena AI tidak hilang saat tutup buka aplikasi.
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(this@ArenaWebView, true)
+            cookieManager.setAcceptThirdPartyCookies(this, true)
             cookieManager.flush()
 
             webViewClient = object : WebViewClient() {
