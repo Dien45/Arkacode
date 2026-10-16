@@ -56,24 +56,24 @@ class EngineReleaseTest {
     }
 
     @Test
-    fun assetCandidates_arm64MuslFirst() {
-        val c = EngineRelease.assetCandidates("arm64-v8a")
-        assertEquals("opencode-linux-arm64-musl.tar.gz", c.first())
-        assertTrue(c.contains("opencode-linux-arm64.tar.gz"))
+    fun packageCandidates_arm64MuslFirst() {
+        val c = EngineRelease.packageCandidates("arm64-v8a")
+        assertEquals("@opencode/cli-linux-arm64-musl", c.first())
+        assertTrue(c.contains("@opencode/cli-linux-arm64"))
     }
 
     @Test
-    fun assetCandidates_x64() {
-        val c = EngineRelease.assetCandidates("x86_64")
-        assertEquals("opencode-linux-x64-musl.tar.gz", c.first())
-        assertTrue(c.contains("opencode-linux-x64.tar.gz"))
+    fun packageCandidates_x64() {
+        val c = EngineRelease.packageCandidates("x86_64")
+        assertEquals("@opencode/cli-linux-x64-musl", c.first())
+        assertTrue(c.contains("@opencode/cli-linux-x64"))
     }
 
     @Test
     fun downloadUrl_shape() {
         assertEquals(
-            "https://github.com/anomalyco/opencode/releases/download/v1.19.1/opencode-linux-arm64-musl.tar.gz",
-            EngineRelease.downloadUrl("v1.19.1", "opencode-linux-arm64-musl.tar.gz"),
+            "https://registry.npmjs.org/@opencode/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.0.31.tgz",
+            EngineRelease.downloadUrl("v2.0.31", "@opencode/cli-linux-arm64-musl"),
         )
     }
 }

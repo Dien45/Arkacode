@@ -438,7 +438,7 @@ fun ChatScreen(
             request = req,
             onReply = { answers ->
                 scope.launch {
-                    runCatching { client.replyQuestion(sessionId, req.id, answers) }
+                    runCatching { client.replyQuestion(sessionId, req, answers) }
                     registry.refresh(sessionId)
                 }
             },

@@ -16,31 +16,41 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 /**
  * Unduh + jalankan binary `opencode` resmi di dalam proot Alpine (F0).
  *
- * - Versi di-pin ([ENGINE_VERSION]) demi build reproducible.
+ * - Engine = opencode line **v2** (paket npm `@opencode/cli*`); API `/api/...`.
+ * - Versi di-pin ([EngineConfig.VERSION]) demi build reproducible.
  * - Binary ditaruh di `<filesDir>/engine/opencode`, di-bind ke
  *   `/opt/arkacode` di dalam distro, dijalankan langsung (tanpa sh) agar
  *   sinyal stop bekerja.
  * - Server dipegang sebagai [Process] + log append ke `serve.log`.
  */
 object EngineConfig {
-    const val VERSION = "v1.19.1"
-    // Build musl = cocok untuk Alpine; fallback build gnu bila musl bermasalah.
-    const val ASSET_MUSL = "opencode-linux-arm64-musl.tar.gz"
-    const val ASSET_MUSL_SHA256 = "a23fad97cdac6f4c767d06709b941f00ae583eb8bf06183a0d3dc7ec0bd2d287"
-    const val ASSET_GNU = "opencode-linux-arm64.tar.gz"
-    const val ASSET_GNU_SHA256 = "3840e9afb2462a666d31816b20bc13b91af9845c329cff660a972aa9cfaee3a2"
+    /** Versi engine yang dipin (line v2, dipublikasikan sebagai paket npm `@opencode/cli`). */
+    const val VERSION = "2.0.31"
     const val DEFAULT_PORT = 4096
     const val DEFAULT_HOST = "127.0.0.1"
 
-    data class Asset(val name: String, val sha256: String)
-
-    fun assets(): List<Asset> = listOf(
-        Asset(ASSET_MUSL, ASSET_MUSL_SHA256),
-        Asset(ASSET_GNU, ASSET_GNU_SHA256),
+    /**
+     * Integritas `sha512-<base64>` yang dipin dari npm untuk VERSION. Dipakai sebagai
+     * fallback bila metadata registry tak terjangkau; bila ada yang lebih baru, integritas
+     * tetap diambil dari registry saat resolusi rilis.
+     */
+    private val PINNED_INTEGRITY = mapOf(
+        "@opencode/cli-linux-arm64-musl" to
+            "sha512-SgmNyd7wIRpQ42xwJMFsNGk9H9nB3cp5MF5nhg+unnBWTRl9QuM7p+6mFBMvk/2lmyPq9oAt/oqWLvFM3i0GUQ==",
+        "@opencode/cli-linux-arm64" to
+            "sha512-LGAcODO4N9L+508pfVolMxPapGw+O3VG/Jo+1VlbuLC+RDH7IIX6Hi1bw5ofD4cfsC+zIJuZ/NF7cHPNSvH0mw==",
+        "@opencode/cli-linux-x64-musl" to
+            "sha512-Rum5c9g+UARVgm8Ydpv2qdruKrdgM0SARSFzt+rjoewR1I22ZMjPXVKSNo8FOhQvmubMSCbT6HB/UR/wZNqdZQ==",
+        "@opencode/cli-linux-x64" to
+            "sha512-RYbqR/HzKTH9OSh98VOt78bgQ8sgidUCCCKR9CABSc06AFxZdycezIg8dUmh+uBdp2mf4ckWVq9BbGblbxtFZQ==",
     )
 
-    fun downloadUrl(asset: String) =
-        "https://github.com/anomalyco/opencode/releases/download/$VERSION/$asset"
+    fun pinnedIntegrity(pkg: String): String? = PINNED_INTEGRITY[pkg]
+
+    /** Paket kandidat (musl dulu) untuk ABI perangkat. */
+    fun packages(abi: String): List<String> = EngineRelease.packageCandidates(abi)
+
+    fun downloadUrl(pkg: String): String = EngineRelease.downloadUrl(VERSION, pkg)
 }
 
 sealed interface EngineState {
@@ -76,7 +86,10 @@ class EngineManager(private val context: Context) {
     suspend fun version(): String? = withContext(Dispatchers.IO) {
         runCatching {
             val out = runOneShot(listOf("/opt/arkacode/opencode", "--version")).trim()
-            out.takeIf { it.contains(Regex("\\d+\\.\\d+")) }?.take(100)
+            // Output v2 bisa berbentuk "opencode v2.0.31"; ambil hanya inti semver-nya
+            // agar tampilan & perbandingan versi konsisten.
+            Regex("\\d+\\.\\d+\\.\\d+").find(out)?.value
+                ?: Regex("\\d+\\.\\d+").find(out)?.value
         }.getOrNull()
     }
 
@@ -164,7 +177,7 @@ class EngineManager(private val context: Context) {
 
     /**
      * Unduh + verifikasi + ekstrak binary. [onProgress] 0..100.
-     * Berhasil bila zip valid, berisi entry `opencode`, dan `--version` jalan.
+     * Berhasil bila arsip valid, berisi entry `opencode`, dan `--version` jalan.
      */
     suspend fun ensureInstalled(onProgress: (Int) -> Unit = {}): Result<String> =
         withContext(Dispatchers.IO) {
@@ -174,16 +187,17 @@ class EngineManager(private val context: Context) {
                 }
                 val archive = File(engineDir, "opencode.tgz")
                 var downloaded = false
-                var lastAsset: String? = null
+                var lastPkg: String? = null
                 var lastError: Exception? = null
-                for (asset in EngineConfig.assets()) {
+                for (pkg in EngineConfig.packages(distro.abi)) {
                     try {
                         onProgress(0)
-                        lastAsset = asset.name
-                        download(EngineConfig.downloadUrl(asset.name), archive, onProgress)
-                        val actual = sha256Hex(archive)
-                        if (!actual.equals(asset.sha256, ignoreCase = true)) {
-                            throw IllegalStateException("Checksum ${asset.name} tidak cocok (rusak/terpotong?)")
+                        lastPkg = pkg
+                        download(EngineConfig.downloadUrl(pkg), archive, onProgress)
+                        EngineConfig.pinnedIntegrity(pkg)?.let { expected ->
+                            if (!sha512Base64(archive).equals(expected, ignoreCase = true)) {
+                                throw IllegalStateException("Checksum $pkg tidak cocok (rusak/terpotong?)")
+                            }
                         }
                         downloaded = true
                         break
@@ -194,7 +208,7 @@ class EngineManager(private val context: Context) {
                 if (!downloaded) throw lastError ?: IllegalStateException("Unduhan engine gagal")
                 onProgress(95)
                 extractBinary(archive)
-                runCatching { File(engineDir, "asset.txt").writeText(lastAsset ?: "?") }
+                runCatching { File(engineDir, "asset.txt").writeText(lastPkg ?: "?") }
                 archive.delete()
                 onProgress(100)
                 version() ?: "terpasang (distro belum siap untuk cek versi)"
@@ -227,8 +241,9 @@ class EngineManager(private val context: Context) {
         if (target.length() < 1_000_000) throw IllegalStateException("Berkas unduhan terlalu kecil, kemungkinan bukan zip valid")
     }
 
-    private fun sha256Hex(file: File): String {
-        val md = java.security.MessageDigest.getInstance("SHA-256")
+    /** Hitung integritas npm `sha512-<base64>` untuk [file]. */
+    private fun sha512Base64(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-512")
         file.inputStream().use { input ->
             val buf = ByteArray(256 * 1024)
             while (true) {
@@ -237,7 +252,8 @@ class EngineManager(private val context: Context) {
                 md.update(buf, 0, n)
             }
         }
-        return md.digest().joinToString("") { "%02x".format(it) }
+        val b64 = android.util.Base64.encodeToString(md.digest(), android.util.Base64.NO_WRAP)
+        return "sha512-$b64"
     }
 
     private fun extractBinary(tarGzFile: File) = extractBinaryTo(tarGzFile, binaryFile())
@@ -266,26 +282,25 @@ class EngineManager(private val context: Context) {
 
     // --------------------------------------------------------- pembaruan (update)
 
-    /** Hasil cek pembaruan: versi terpasang vs rilis terbaru + digest aset. */
+    /** Hasil cek pembaruan: versi terpasang vs versi npm terbaru + integritas paket. */
     data class Update(
         val current: String?,
         val latest: String,
         val hasUpdate: Boolean,
-        val assets: Map<String, String?>,
+        val integrities: Map<String, String?>,
     )
 
     /**
-     * Cek rilis terbaru opencode (tag via redirect tanpa API; digest via API).
-     * Null bila gagal jaringan / tag tak terbaca.
+     * Cek versi terbaru opencode di npm (meta `@opencode/cli`). Integritas per paket
+     * platform hanya diambil bila memang ada pembaruan. Null bila gagal jaringan.
      */
     suspend fun checkUpdate(): Update? = withContext(Dispatchers.IO) {
         runCatching {
-            val latest = EngineRelease.latestTag() ?: return@runCatching null
+            val latest = EngineRelease.latestVersion(distro.abi) ?: return@runCatching null
             val current = version() ?: EngineConfig.VERSION
             val hasUpdate = EngineRelease.isNewer(latest, current)
-            // Digest hanya diambil lewat API bila memang ada pembaruan (hemat kuota API).
-            val assets = if (hasUpdate) {
-                runCatching { EngineRelease.releaseAssets(latest) }.getOrNull() ?: emptyMap()
+            val integrities = if (hasUpdate) {
+                runCatching { EngineRelease.latestRelease(distro.abi)?.integrity }.getOrNull() ?: emptyMap()
             } else {
                 emptyMap()
             }
@@ -293,20 +308,20 @@ class EngineManager(private val context: Context) {
                 current = current,
                 latest = latest,
                 hasUpdate = hasUpdate,
-                assets = assets,
+                integrities = integrities,
             )
         }.getOrNull()
     }
 
     /**
-     * Pasang rilis [tag]: unduh aset cocok-ABI (musl, lalu gnu), verifikasi sha256
-     * bila tersedia, ekstrak ke `opencode.new`, tukar atomik dengan backup, lalu
-     * verifikasi `--version` = tag. Menolak bila server sedang jalan (file dipakai).
+     * Pasang rilis [version]: unduh paket cocok-ABI (musl, lalu gnu), verifikasi
+     * integritas sha512 bila tersedia, ekstrak ke `opencode.new`, tukar atomik dengan
+     * backup, lalu verifikasi `--version` = version. Menolak bila server sedang jalan.
      */
     private suspend fun installRelease(
-        tag: String,
+        version: String,
         candidates: List<String>,
-        digests: Map<String, String?>,
+        integrities: Map<String, String?>,
         onProgress: (Int) -> Unit,
         onLog: (String) -> Unit,
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -319,23 +334,23 @@ class EngineManager(private val context: Context) {
 
             var lastError: Exception? = null
             var used: String? = null
-            for (name in candidates) {
+            for (pkg in candidates) {
                 try {
                     onProgress(0)
-                    onLog("mengunduh $name...")
-                    download(EngineRelease.downloadUrl(tag, name), dl, onProgress)
-                    val expected = digests[name]
+                    onLog("mengunduh ${pkg.substringAfterLast('/')}...")
+                    download(EngineRelease.downloadUrl(version, pkg), dl, onProgress)
+                    val expected = integrities[pkg]
                     if (expected != null) {
-                        val actual = sha256Hex(dl)
+                        val actual = sha512Base64(dl)
                         if (!actual.equals(expected, ignoreCase = true)) {
-                            throw IllegalStateException("checksum $name tidak cocok")
+                            throw IllegalStateException("checksum $pkg tidak cocok")
                         }
                     } else {
-                        onLog("catatan: sha256 $name tidak tersedia dari rilis - verifikasi via --version.")
+                        onLog("catatan: integritas $pkg tak tersedia - verifikasi via --version.")
                     }
                     onProgress(92)
                     extractBinaryTo(dl, newBin)
-                    used = name
+                    used = pkg
                     break
                 } catch (e: Exception) {
                     lastError = e
@@ -363,10 +378,10 @@ class EngineManager(private val context: Context) {
             // di distro yang baru dipasang (best-effort; marker membuatnya no-op).
             runCatching { ensureGuestLibs() }
 
-            // Verifikasi: binary baru harus melaporkan versi = tag.
+            // Verifikasi: binary baru harus melaporkan versi = version.
             onProgress(97)
             val v = version()
-            if (v == null || !EngineRelease.sameVersion(v, tag)) {
+            if (v == null || !EngineRelease.sameVersion(v, version)) {
                 runCatching { bin.delete() }
                 if (hadOld) runCatching { bak.renameTo(bin) }
                 throw IllegalStateException("verifikasi gagal (--version: ${v ?: "tidak terbaca"})")
@@ -388,19 +403,19 @@ class EngineManager(private val context: Context) {
         onProgress: (Int) -> Unit = {},
         onLog: (String) -> Unit = {},
     ): Result<String> = withContext(Dispatchers.IO) {
-        val rel = runCatching { EngineRelease.latestRelease() }.getOrNull()
+        val rel = runCatching { EngineRelease.latestRelease(distro.abi) }.getOrNull()
         if (rel != null) {
             val r = installRelease(
-                tag = rel.tag,
-                candidates = EngineRelease.assetCandidates(distro.abi),
-                digests = rel.assets,
+                version = rel.version,
+                candidates = EngineConfig.packages(distro.abi),
+                integrities = rel.integrity,
                 onProgress = onProgress,
                 onLog = onLog,
             )
             if (r.isSuccess) return@withContext r
             onLog("unduh rilis terbaru gagal: ${r.exceptionOrNull()?.message ?: "?"}; coba versi bawaan.")
         } else {
-            onLog("riwayat rilis tak terbaca (offline?) - pakai versi bawaan ${EngineConfig.VERSION}.")
+            onLog("metadata npm tak terbaca (offline?) - pakai versi bawaan ${EngineConfig.VERSION}.")
         }
         ensureInstalled(onProgress)
     }
@@ -411,9 +426,9 @@ class EngineManager(private val context: Context) {
         onProgress: (Int) -> Unit = {},
         onLog: (String) -> Unit = {},
     ): Result<String> = installRelease(
-        tag = update.latest,
-        candidates = EngineRelease.assetCandidates(distro.abi),
-        digests = update.assets,
+        version = update.latest,
+        candidates = EngineConfig.packages(distro.abi),
+        integrities = update.integrities,
         onProgress = onProgress,
         onLog = onLog,
     )
@@ -424,8 +439,8 @@ class EngineManager(private val context: Context) {
         distro.install(DistroManager.DEFAULT_ROOTFS_URL, onProgress)
 
     /**
-     * Jalankan `opencode serve` sebagai proses persisten, lalu tunggu
-     * `/global/health` OK (maks [waitMs]). Kembalikan port bila siap.
+     * Jalankan `opencode serve` sebagai proses persisten, lalu tunggu `/api/info`
+     * (v2) OK (maks [waitMs]). Kembalikan port bila siap.
      */
     suspend fun startServer(
         port: Int = EngineConfig.DEFAULT_PORT,
@@ -436,6 +451,9 @@ class EngineManager(private val context: Context) {
             if (serverProcess?.isAlive == true) return@runCatching port
             val bin = binaryFile()
             check(isDownloaded()) { "Engine belum siap (belum diunduh / file rusak). Unduh ulang." }
+            // Reap sisa server lama (mis. proses yang selamat saat app di-restart / versi
+            // engine baru baru saja dipasang) agar port tidak bentrok saat bind.
+            reapStrayServers()
             ensureGuestLibs().getOrThrow()
             workDir.mkdirs()
             logFile().appendText("\n===== serve start port=$port =====\n")
@@ -490,6 +508,32 @@ class EngineManager(private val context: Context) {
         runCatching { serverProcess?.destroyForcibly() }
         serverProcess = null
         runCatching { logFile().appendText("===== serve stop =====\n") }
+    }
+
+    /**
+     * Cari proses `opencode serve` milik app ini di `/proc` yang bukan child kita
+     * (sisa server yang tetap hidup setelah app di-restart / ganti binary), lalu
+     * kirim SIGTERM. Aman: hanya cocok untuk cmdline yang memuat "opencode",
+     * "serve", dan "--port"; proses lain (termasuk app) tak terpengaruh.
+     */
+    private fun reapStrayServers() {
+        val me = android.os.Process.myPid()
+        val stray = mutableListOf<Int>()
+        File("/proc").listFiles()?.forEach { d ->
+            val pid = d.name.toIntOrNull() ?: return@forEach
+            if (pid == me) return@forEach
+            val cmd = runCatching { File(d, "cmdline").readBytes().toString(Charsets.UTF_8) }
+                .getOrNull() ?: return@forEach
+            if (cmd.contains("opencode") && cmd.contains("serve") && cmd.contains("--port")) {
+                stray.add(pid)
+            }
+        }
+        if (stray.isEmpty()) return
+        stray.forEach { runCatching { android.os.Process.sendSignal(it, 15) } }
+        runCatching { logFile().appendText("===== reap stray: ${stray.joinToString()} =====\n") }
+        // Beri waktu port dibebaskan sebelum bind ulang.
+        runCatching { Thread.sleep(600) }
+        stray.forEach { runCatching { android.os.Process.sendSignal(it, 9) } }
     }
 
     /**

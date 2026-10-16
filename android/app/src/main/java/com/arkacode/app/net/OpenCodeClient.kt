@@ -37,7 +37,7 @@ import kotlin.coroutines.resumeWithException
 data class ServerHealth(val healthy: Boolean, val version: String)
 
 /**
- * Klien HTTP untuk `opencode serve` v1.19 (`/api/...`, skema dari tag sumber).
+ * Klien HTTP untuk `opencode serve` line **v2** (`/api/...`, engine npm `@opencode/cli`).
  * Semua panggilan cancellable (Stop/abort benar-benar memutus HTTP).
  * Parsing longgar: field tak dikenal diabaikan, bentuk tak dikenal → dilewati.
  */
@@ -104,6 +104,12 @@ class OpenCodeClient(
             .build()
     }
 
+    private fun deleteReq(path: String): Request = Request.Builder()
+        .url(baseUrl + path)
+        .header("Authorization", authHeader())
+        .delete()
+        .build()
+
     // ------------------------------------------------------------- helpers
 
     private fun JsonObject.str(key: String): String? =
@@ -125,12 +131,13 @@ class OpenCodeClient(
     // ------------------------------------------------------------- endpoints
 
     suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
-        val el = call(getReq("/global/health"))
-        val o = el as? JsonObject ?: JsonObject(emptyMap())
-        ServerHealth(
-            healthy = o["healthy"]?.jsonPrimitive?.booleanOrNull == true,
-            version = o.str("version") ?: "?",
-        )
+        // v2: /global/health digantikan /api/info (tak punya `healthy`; 2xx = sehat).
+        // PENTING: server v1 / SPA fallback bisa membalas HTML 200 ke path tak dikenal,
+        // jadi validasi bentuk JSON v2 (`version`) — kalau bukan, anggap TIDAK sehat.
+        val el = call(getReq("/api/info"))
+        val o = el as? JsonObject ?: throw IllegalStateException("Bukan server v2 (respons bukan JSON)")
+        val version = o.str("version") ?: throw IllegalStateException("Bukan server v2 (tak ada version)")
+        ServerHealth(healthy = true, version = version)
     }
 
     private fun encodeRelPath(path: String): String =
@@ -426,28 +433,26 @@ class OpenCodeClient(
         text: String,
         files: List<Attachment> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
+        // v2: body FLAT `{text, files?}`, additionalProperties:false → buang `mime`.
         val body = buildJsonObject {
-            put("prompt", buildJsonObject {
-                put("text", text)
-                if (files.isNotEmpty()) {
-                    put("files", JsonArray(files.map { a ->
-                        buildJsonObject {
-                            put("uri", a.uri)
-                            put("mime", a.mime)
-                            put("name", a.name)
-                        }
-                    }))
-                }
-            })
+            put("text", text)
+            if (files.isNotEmpty()) {
+                put("files", JsonArray(files.map { a ->
+                    buildJsonObject {
+                        put("uri", a.uri)
+                        put("name", a.name)
+                    }
+                }))
+            }
         }
         val el = call(postReq("/api/session/$sessionId/prompt", body.toString()))
         val o = (el as? JsonObject)?.obj("data") ?: JsonObject(emptyMap())
         o.str("id") ?: ""
     }
 
-    /** Tunggu loop agent idle (long-poll; cancel = Stop). */
+    /** Tunggu loop agent idle (long-poll; cancel = Stop). v2: prefix `/api/experimental`. */
     suspend fun waitIdle(sessionId: String) {
-        call(postReq("/api/session/$sessionId/wait", null), useLongTimeout = true)
+        call(postReq("/api/experimental/session/$sessionId/wait", null), useLongTimeout = true)
     }
 
     /** Hentikan turn yang jalan. */
@@ -484,50 +489,84 @@ class OpenCodeClient(
         call(postReq("/api/session/$sessionId/permission/$requestId/reply", body.toString()))
     }
 
-    // --------------------------------------------------- question (question tool)
+    // --------------------------------------------------------- form (question tool)
 
-    private fun parseQuestion(item: JsonElement): QuestionRequest? {
+    /**
+     * v2 mengganti endpoint `question` dengan `form`. Satu `Form.Info` =
+     * `{id, sessionID, title, metadata, fields:[Form.Field]}`; tiap field punya
+     * `key`(wajib), `title`, `description`, `hidden`, `type`, `options?`.
+     * Dipetakan ke [QuestionRequest]/[QuestionInfo] agar UI lama tetap dipakai.
+     */
+    private fun parseForm(item: JsonElement): QuestionRequest? {
         val o = item as? JsonObject ?: return null
         val id = o.str("id") ?: return null
-        val questions = o.arr("questions").mapNotNull { q ->
-            val qo = q as? JsonObject ?: return@mapNotNull null
+        val fields = o.arr("fields")
+        val questions = fields.mapNotNull { f ->
+            val fo = f as? JsonObject ?: return@mapNotNull null
+            if ((fo["hidden"] as? JsonPrimitive)?.booleanOrNull == true) return@mapNotNull null
+            val key = fo.str("key") ?: return@mapNotNull null
+            val type = fo.str("type") ?: "string"
+            val title = fo.str("title") ?: key
+            val opts = fo.arr("options")
             QuestionInfo(
-                header = qo.str("header") ?: "",
-                question = qo.str("question") ?: "",
-                options = qo.arr("options").mapNotNull { op ->
+                header = title,
+                question = fo.str("description") ?: title,
+                options = opts.mapNotNull { op ->
                     val oo = op as? JsonObject ?: return@mapNotNull null
-                    val label = oo.str("label") ?: return@mapNotNull null
-                    QuestionOption(label, oo.str("description") ?: "")
+                    val value = oo.str("value") ?: return@mapNotNull null
+                    QuestionOption(
+                        label = oo.str("label") ?: value,
+                        description = oo.str("description") ?: "",
+                        value = value,
+                    )
                 },
-                multiple = (qo["multiple"] as? JsonPrimitive)?.booleanOrNull == true,
-                custom = (qo["custom"] as? JsonPrimitive)?.booleanOrNull != false,
+                multiple = type == "multiselect",
+                custom = type in setOf("string", "number", "integer", "external") || opts.isEmpty(),
+                key = key,
+                type = type,
             )
         }
+        if (questions.isEmpty()) return null
         return QuestionRequest(id, questions)
     }
 
-    /** Pertanyaan agent yang menunggu jawaban di sesi ini. */
+    /** Form/pertanyaan agent yang menunggu jawaban di sesi ini. */
     suspend fun listQuestions(sessionId: String): List<QuestionRequest> = withContext(Dispatchers.IO) {
-        val el = runCatching { call(getReq("/api/session/$sessionId/question")) }.getOrNull()
+        val el = runCatching { call(getReq("/api/session/$sessionId/form")) }.getOrNull()
             ?: return@withContext emptyList()
         val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
-        data.mapNotNull { parseQuestion(it) }
+        data.mapNotNull { parseForm(it) }
     }
 
-    /** Jawab pertanyaan: `answers[q]` = daftar label terpilih untuk pertanyaan ke-q. */
-    suspend fun replyQuestion(sessionId: String, requestId: String, answers: List<List<String>>) {
-        val body = buildJsonObject {
-            put(
-                "answers",
-                JsonArray(answers.map { a -> JsonArray(a.map { JsonPrimitive(it) }) }),
-            )
+    /**
+     * Jawab form: `answers[q]` = daftar label terpilih / teks bebas untuk pertanyaan ke-q.
+     * Label dipetakan ke `Form.Option.value`; body akhir `{answer:{<key>:<value>}}`.
+     */
+    suspend fun replyQuestion(sessionId: String, request: QuestionRequest, answers: List<List<String>>) {
+        val answer = buildJsonObject {
+            request.questions.forEachIndexed { qi, q ->
+                if (q.key.isBlank()) return@forEachIndexed
+                val labels = answers.getOrElse(qi) { emptyList() }
+                val values = labels.map { lbl ->
+                    q.options.firstOrNull { it.label == lbl }?.value ?: lbl
+                }.filter { it.isNotBlank() }
+                when (q.type) {
+                    "multiselect" ->
+                        if (values.isNotEmpty()) put(q.key, JsonArray(values.map { JsonPrimitive(it) }))
+                    "boolean" -> put(q.key, JsonPrimitive(values.firstOrNull()?.toBooleanStrictOrNull() ?: false))
+                    "number" -> put(q.key, JsonPrimitive(values.firstOrNull()?.toDoubleOrNull() ?: 0.0))
+                    "integer" -> put(q.key, JsonPrimitive(values.firstOrNull()?.toLongOrNull() ?: 0L))
+                    else -> values.firstOrNull()?.let { put(q.key, JsonPrimitive(it)) }
+                }
+            }
         }
-        call(postReq("/api/session/$sessionId/question/$requestId/reply", body.toString()))
+        val body = buildJsonObject { put("answer", answer) }
+        call(postReq("/api/session/$sessionId/form/${request.id}/reply", body.toString()))
     }
 
-    /** Tolak/tutup pertanyaan tanpa menjawab. */
+    /** Tolak/tutup form tanpa menjawab (v2: DELETE form). */
     suspend fun rejectQuestion(sessionId: String, requestId: String) {
-        runCatching { call(postReq("/api/session/$sessionId/question/$requestId/reject", null)) }
+        runCatching { call(deleteReq("/api/session/$sessionId/form/$requestId")) }
     }
 
     /** Ganti model sesi (server-side; pengganti pin model Arka). */
@@ -671,9 +710,9 @@ class OpenCodeClient(
             RevertState(o.str("messageID") ?: messageId, diffs)
         }
 
-    /** Buang revert yang distage (tidak mengubah berkas). */
+    /** Buang revert yang distage (tidak mengubah berkas). v2: DELETE /revert. */
     suspend fun clearRevert(sessionId: String) {
-        call(postReq("/api/session/$sessionId/revert/clear", null))
+        call(deleteReq("/api/session/$sessionId/revert"))
     }
 
     /** Terapkan revert yang distage (kembalikan berkas ke snapshot). */
@@ -689,23 +728,31 @@ class OpenCodeClient(
         val methods = o.arr("methods").mapNotNull { m ->
             val mo = m as? JsonObject ?: return@mapNotNull null
             val mtype = mo.str("type") ?: return@mapNotNull null
-            val prompts = mo.arr("prompts").mapNotNull { p ->
+            // v2: metode oauth/key/external membawa `form` (Form.Fields).
+            // Fallback (legacy): `prompts`. Keduanya punya {key,type,options,when}.
+            val rawFields = mo.arr("form").ifEmpty { mo.arr("prompts") }
+            val prompts = rawFields.mapNotNull { p ->
                 val po = p as? JsonObject ?: return@mapNotNull null
                 val pkey = po.str("key") ?: return@mapNotNull null
-                val wh = po.obj("when")
+                val opts = po.arr("options")
+                val wh = when (val w = po["when"]) {
+                    is JsonArray -> w.firstOrNull() as? JsonObject
+                    is JsonObject -> w
+                    else -> null
+                }
                 IntegrationPrompt(
-                    type = po.str("type") ?: "text",
+                    type = if (opts.isNotEmpty()) "select" else (po.str("type") ?: "text"),
                     key = pkey,
-                    message = po.str("message") ?: pkey,
+                    message = po.str("message") ?: po.str("description") ?: po.str("title") ?: pkey,
                     placeholder = po.str("placeholder"),
-                    options = po.arr("options").mapNotNull { op ->
+                    options = opts.mapNotNull { op ->
                         val oo = op as? JsonObject ?: return@mapNotNull null
                         val v = oo.str("value") ?: return@mapNotNull null
                         IntegrationOption(oo.str("label") ?: v, v, oo.str("hint"))
                     },
-                    whenKey = wh.str("key"),
-                    whenOp = wh.str("op"),
-                    whenValue = wh.str("value"),
+                    whenKey = wh?.str("key"),
+                    whenOp = wh?.str("op"),
+                    whenValue = wh?.str("value"),
                 )
             }
             IntegrationMethod(
@@ -768,7 +815,8 @@ class OpenCodeClient(
     ): OAuthAttempt = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("methodID", methodID)
-            put("inputs", buildJsonObject { inputs.forEach { (k, v) -> put(k, v) } })
+            // v2: field form/inputs bernama `answer` (Form.Answer), bukan `inputs`.
+            put("answer", buildJsonObject { inputs.forEach { (k, v) -> put(k, v) } })
             if (label != null) put("label", label)
         }
         val el = call(
@@ -786,37 +834,30 @@ class OpenCodeClient(
         )
     }
 
+    private fun oauthPath(integrationId: String, attemptID: String): String {
+        val i = java.net.URLEncoder.encode(integrationId, "UTF-8")
+        val a = java.net.URLEncoder.encode(attemptID, "UTF-8")
+        return "/api/integration/$i/connect/oauth/$a"
+    }
+
     /**
      * Status attempt OAuth. `null` = gagal jaringan sementara (server tak
      * terjangkau) — pemanggil sebaiknya lanjut polling, bukan menyimpulkan gagal.
+     * v2: attempt kini bersarang di bawah integrasi (`connect/oauth/{attemptID}`).
      */
-    suspend fun oauthStatus(attemptID: String): OAuthStatus? = withContext(Dispatchers.IO) {
-        val el = runCatching {
-            call(getReq("/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8")))
-        }.getOrNull() ?: return@withContext null
+    suspend fun oauthStatus(integrationId: String, attemptID: String): OAuthStatus? = withContext(Dispatchers.IO) {
+        val el = runCatching { call(getReq(oauthPath(integrationId, attemptID))) }.getOrNull()
+            ?: return@withContext null
         val o = (el as? JsonObject)?.obj("data") ?: (el as? JsonObject) ?: JsonObject(emptyMap())
         OAuthStatus(o.str("status") ?: "pending", o.str("message"))
     }
 
-    suspend fun completeOAuth(attemptID: String, code: String?) {
+    suspend fun completeOAuth(integrationId: String, attemptID: String, code: String?) {
         val body = buildJsonObject { if (!code.isNullOrBlank()) put("code", code) }
-        call(
-            postReq(
-                "/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8") + "/complete",
-                body.toString(),
-            ),
-        )
+        call(postReq(oauthPath(integrationId, attemptID) + "/complete", body.toString()))
     }
 
-    suspend fun cancelOAuth(attemptID: String) {
-        runCatching {
-            call(
-                Request.Builder()
-                    .url(baseUrl + "/api/integration/attempt/" + java.net.URLEncoder.encode(attemptID, "UTF-8"))
-                    .header("Authorization", authHeader())
-                    .delete()
-                    .build(),
-            )
-        }
+    suspend fun cancelOAuth(integrationId: String, attemptID: String) {
+        runCatching { call(deleteReq(oauthPath(integrationId, attemptID))) }
     }
 }
