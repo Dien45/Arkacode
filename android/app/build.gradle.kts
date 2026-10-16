@@ -1,4 +1,6 @@
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -16,7 +18,7 @@ plugins {
 // - Di CI rilis (tag v*): file ini ditulis ulang dari GitHub Secrets (kunci rilis).
 // ---------------------------------------------------------------------------
 val keystorePropsFile = rootProject.file("keystore.properties")
-val keystoreProps = java.util.Properties().apply {
+val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
 val hasSigning = keystorePropsFile.exists() &&
