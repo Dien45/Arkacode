@@ -135,8 +135,9 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
 
     fun finish() {
         val att = active?.attempt ?: return
+        val integrationId = active?.integration?.id ?: return
         scope.launch {
-            runCatching { client.completeOAuth(att.attemptID, codeInput) }
+            runCatching { client.completeOAuth(integrationId, att.attemptID, codeInput) }
                 .onSuccess {
                     notice = I18n.s.oauthComplete
                     active = null
@@ -150,8 +151,9 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
 
     fun cancelAttempt() {
         val att = active?.attempt ?: return
+        val integrationId = active?.integration?.id ?: return
         scope.launch {
-            runCatching { client.cancelOAuth(att.attemptID) }
+            runCatching { client.cancelOAuth(integrationId, att.attemptID) }
             active = null
             statusText = null
             codeInput = ""
@@ -162,9 +164,10 @@ fun IntegrationsSheet(port: Int, password: String, onDismiss: () -> Unit) {
     LaunchedEffect(active?.attempt?.attemptID) {
         val att = active?.attempt ?: return@LaunchedEffect
         if (att.mode == "code") return@LaunchedEffect
+        val integrationId = active?.integration?.id ?: return@LaunchedEffect
         while (true) {
             delay(2500)
-            val st = runCatching { client.oauthStatus(att.attemptID) }.getOrNull() ?: continue
+            val st = runCatching { client.oauthStatus(integrationId, att.attemptID) }.getOrNull() ?: continue
             when (st.status) {
                 "complete" -> {
                     notice = I18n.s.oauthComplete

@@ -87,16 +87,25 @@ data class ModelRef(val providerID: String, val id: String)
 /** Permintaan persetujuan (ringkasan best-effort dari field mentahnya). */
 data class PermissionReq(val id: String, val summary: String)
 
-/** Satu opsi jawaban untuk pertanyaan agent (question tool). */
-data class QuestionOption(val label: String, val description: String)
+/** Satu opsi jawaban untuk pertanyaan agent (form field). */
+data class QuestionOption(
+    val label: String,
+    val description: String,
+    /** Nilai yang dikirim ke server (`Form.Option.value`); default = label. */
+    val value: String = label,
+)
 
-/** Satu pertanyaan dari agent (question tool). */
+/** Satu pertanyaan dari agent (dipetakan dari `Form.Field` v2). */
 data class QuestionInfo(
     val header: String,
     val question: String,
     val options: List<QuestionOption>,
     val multiple: Boolean,
     val custom: Boolean,
+    /** Kunci field form v2 (dipakai saat mengirim jawaban). */
+    val key: String = "",
+    /** Tipe field v2: string|number|integer|boolean|multiselect|external. */
+    val type: String = "string",
 )
 
 /** Permintaan pertanyaan yang menunggu jawaban user. */
