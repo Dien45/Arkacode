@@ -8,8 +8,23 @@ data class ChatSession(
     val modelID: String? = null,
 )
 
-/** Satu tool-call dalam balasan assistant. */
-data class ToolUse(val id: String, val name: String, val status: String)
+/**
+ * Satu tool-call dalam balasan assistant. [detail] = ringkasan input
+ * (perintah shell, path, pola); [output] = stdout/stderr (diisi penuh saat
+ * selesai, atau tumbuh realtime dari file `.out` saat masih berjalan).
+ * [shellId]/[shellFile] hanya jalur internal untuk men-tail output live.
+ */
+data class ToolUse(
+    val id: String,
+    val name: String,
+    val status: String,
+    val detail: String? = null,
+    val output: String = "",
+    val exit: Int? = null,
+    val truncated: Boolean = false,
+    val shellId: String? = null,
+    val shellFile: String? = null,
+)
 
 /** Item chat siap-render. */
 sealed interface ChatItem {
@@ -141,12 +156,22 @@ sealed interface ServerEvent {
     /** Potongan reasoning (streaming). */
     data class ReasoningDelta(override val sessionID: String?, val messageID: String?, val delta: String) : ServerEvent
 
-    /** Perubahan status tool (label/id boleh kosong pada event legacy). */
+    /**
+     * Perubahan tool (id/label boleh kosong pada event legacy). Field baru
+     * membawa perintah, output, dan penunjuk file stdout (`shell.created`) agar
+     * UI bisa menampilkan output realtime.
+     */
     data class Tool(
         override val sessionID: String?,
         val id: String,
         val label: String,
         val status: String,
+        val detail: String? = null,
+        val output: String? = null,
+        val exit: Int? = null,
+        val truncated: Boolean = false,
+        val shellId: String? = null,
+        val shellFile: String? = null,
     ) : ServerEvent
 
     /** Persetujuan muncul/selesai. */

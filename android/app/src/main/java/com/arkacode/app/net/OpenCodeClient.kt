@@ -121,6 +121,29 @@ class OpenCodeClient(
     private fun JsonObject.obj(key: String): JsonObject =
         (this[key] as? JsonObject) ?: JsonObject(emptyMap())
 
+    private fun JsonObject.int(key: String): Int? =
+        (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+
+    private fun JsonObject.bool(key: String): Boolean =
+        (this[key] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: false
+
+    /** Ringkasan input tool untuk ditampilkan (perintah/path/pola). */
+    private fun toolDetail(input: JsonObject): String? =
+        input.str("command")
+            ?: input.str("filePath")
+            ?: input.str("path")
+            ?: input.str("pattern")
+            ?: input.str("description")
+            ?: input.str("query")
+
+    /** Teks pertama dari array `content` tool (stdout/stderr). */
+    private fun toolText(content: JsonArray): String? =
+        content.mapNotNull { (it as? JsonObject)?.str("text") }.firstOrNull()
+
+    /** Ambil `command` dari argumen tool mentah (string JSON `session.tool.input.ended`). */
+    private fun commandFromArgs(raw: String): String? =
+        runCatching { json.parseToJsonElement(raw).jsonObject.str("command") }.getOrNull()
+
     /** Ambil array `data`, toleran bila server mengembalikan array telanjang. */
     private fun JsonElement.dataArray(): JsonArray = when (this) {
         is JsonObject -> arr("data")
@@ -256,7 +279,7 @@ class OpenCodeClient(
     }.flowOn(Dispatchers.IO)
 
     /** Parse satu payload JSON SSE → [ServerEvent] (V2 `data`, fallback `properties`). */
-    private fun parseServerEvent(raw: String): ServerEvent? {
+    internal fun parseServerEvent(raw: String): ServerEvent? {
         val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
         val type = root.str("type") ?: return null
         val payload = (root["data"] as? JsonObject)
@@ -288,19 +311,90 @@ class OpenCodeClient(
                 val part = payload.obj("part")
                 when (part.str("type")) {
                     "text" -> ServerEvent.TextEnded(sid, part.str("messageID"), part.str("text") ?: "")
-                    "tool" -> ServerEvent.Tool(
-                        sid,
-                        part.str("callID") ?: part.str("id") ?: "",
-                        part.str("tool") ?: "",
-                        part.obj("state").str("status") ?: "",
-                    )
+                    "tool" -> {
+                        val st = part.obj("state")
+                        val md = st.obj("metadata")
+                        ServerEvent.Tool(
+                            sid,
+                            part.str("callID") ?: part.str("id") ?: "",
+                            part.str("name") ?: part.str("tool") ?: "",
+                            st.str("status") ?: "",
+                            detail = toolDetail(st.obj("input")),
+                            output = toolText(st.arr("content")),
+                            exit = md.int("exit"),
+                            truncated = md.bool("truncated"),
+                        )
+                    }
                     else -> ServerEvent.Other(sid, type)
                 }
             }
-            "session.tool.input.started" -> ServerEvent.Tool(sid, "", payload.str("name") ?: "", "running")
-            "session.tool.called" -> ServerEvent.Tool(sid, "", "", "running")
-            "session.tool.success" -> ServerEvent.Tool(sid, "", "", "completed")
-            "session.tool.failed" -> ServerEvent.Tool(sid, "", "", "error")
+            "session.tool.input.started" ->
+                ServerEvent.Tool(sid, payload.str("id") ?: "", payload.str("name") ?: "", "running")
+            "session.tool.input.ended" -> ServerEvent.Tool(
+                sid,
+                payload.str("id") ?: "",
+                "",
+                "running",
+                detail = payload.str("text")?.let { commandFromArgs(it) },
+            )
+            "session.tool.called" -> ServerEvent.Tool(
+                sid,
+                payload.str("id") ?: "",
+                "",
+                "running",
+                detail = toolDetail(payload.obj("input")),
+            )
+            "session.tool.progress" -> ServerEvent.Tool(
+                sid,
+                payload.str("id") ?: "",
+                "",
+                "running",
+                shellId = payload.obj("metadata").str("shellID"),
+            )
+            "session.tool.success" -> {
+                val md = payload.obj("metadata")
+                ServerEvent.Tool(
+                    sid,
+                    payload.str("id") ?: "",
+                    "",
+                    "completed",
+                    output = toolText(payload.arr("content")),
+                    exit = md.int("exit"),
+                    truncated = md.bool("truncated"),
+                )
+            }
+            "session.tool.failed" -> {
+                val md = payload.obj("metadata")
+                ServerEvent.Tool(
+                    sid,
+                    payload.str("id") ?: "",
+                    "",
+                    "error",
+                    output = toolText(payload.arr("content")),
+                    exit = md.int("exit"),
+                )
+            }
+            "shell.created" -> {
+                val info = payload.obj("info")
+                ServerEvent.Tool(
+                    info.obj("metadata").str("sessionID"),
+                    "",
+                    "shell",
+                    "running",
+                    detail = info.str("command"),
+                    shellId = info.str("id"),
+                    shellFile = info.str("file"),
+                )
+            }
+            // shell.exited tak membawa sessionID — registry mencocokkan lewat shellId.
+            "shell.exited" -> ServerEvent.Tool(
+                null,
+                "",
+                "shell",
+                "",
+                shellId = payload.str("id"),
+                exit = payload.int("exit"),
+            )
             "permission.asked", "permission.v2.asked", "permission.replied", "permission.v2.replied" ->
                 ServerEvent.Permission(sid)
             "question.asked", "question.v2.asked", "question.replied", "question.rejected",
@@ -404,8 +498,19 @@ class OpenCodeClient(
                         "text" -> p.str("text")?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
                         "reasoning" -> p.str("text")?.takeIf { it.isNotBlank() }?.let { reasonings.add(it) }
                         "tool" -> {
-                            val st = p.obj("state").str("status") ?: ""
-                            tools.add(ToolUse(p.str("id") ?: "", p.str("name") ?: "tool", st))
+                            val st = p.obj("state")
+                            val md = st.obj("metadata")
+                            tools.add(
+                                ToolUse(
+                                    id = p.str("id") ?: "",
+                                    name = p.str("name") ?: p.str("tool") ?: "tool",
+                                    status = st.str("status") ?: "",
+                                    detail = toolDetail(st.obj("input")),
+                                    output = toolText(st.arr("content")) ?: "",
+                                    exit = md.int("exit"),
+                                    truncated = md.bool("truncated"),
+                                ),
+                            )
                         }
                     }
                 }

@@ -81,6 +81,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.Attachment
 import com.arkacode.app.core.Attachments
@@ -399,7 +400,7 @@ fun ChatScreen(
                     if (liveTools.isNotEmpty()) {
                         item("live-tools") {
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                liveTools.forEach { t -> LiveToolCard(t) }
+                                liveTools.forEach { t -> ToolCard(t, live = true) }
                             }
                         }
                     }
@@ -823,25 +824,7 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                     Spacer(Modifier.height(4.dp))
                 }
                 item.tools.forEach { tool ->
-                    ClayCard(contentPadding = PaddingValues(0.dp)) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                tool.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                tool.status.ifBlank { "…" },
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
+                    ToolCard(tool, live = false)
                     Spacer(Modifier.height(4.dp))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -915,37 +898,105 @@ private fun ApprovalSheet(
     }
 }
 
-/** Kartu status tool yang sedang berjalan/menunggu (dari SSE). */
+/**
+ * Kartu tool ala terminal: nama + perintah + output. Saat tool berjalan
+ * ([live]/status running) output mengalir realtime dari file stdout shell.
+ */
 @Composable
-private fun LiveToolCard(tool: ToolUse) {
-    val running = tool.status == "running" || tool.status == "pending" || tool.status.isBlank()
+private fun ToolCard(tool: ToolUse, live: Boolean) {
+    val running = live || tool.status == "running" || tool.status == "pending" ||
+        tool.status.isBlank()
+    val hasOutput = tool.output.isNotBlank()
+    var expanded by remember(tool.id) { mutableStateOf(live) }
     ClayCard(contentPadding = PaddingValues(0.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (running) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp),
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (running) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = if (tool.status == "error") MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Text(
+                    tool.name.ifBlank { "tool" },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    when {
+                        running -> I18n.s.working
+                        tool.exit != null && tool.exit != 0 -> "exit ${tool.exit}"
+                        else -> tool.status.ifBlank { "ok" }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
-            Text(
-                tool.name,
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-            )
-            Text(tool.status.ifBlank { I18n.s.working }, style = MaterialTheme.typography.labelSmall)
+            tool.detail?.takeIf { it.isNotBlank() }?.let { cmd ->
+                Text(
+                    "$ $cmd",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = if (hasOutput) 4.dp else 6.dp),
+                )
+            }
+            if (hasOutput) {
+                if (live || expanded) {
+                    ToolOutput(tool.output)
+                } else {
+                    TextButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    ) {
+                        Text(I18n.s.showOutput, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            } else if (!running) {
+                Spacer(Modifier.height(6.dp))
+            }
         }
+    }
+}
+
+/** Blok output monospace yang tumbuh (auto-scroll ke bawah selama streaming). */
+@Composable
+private fun ToolOutput(text: String) {
+    val state = rememberScrollState()
+    LaunchedEffect(state.maxValue) { state.scrollTo(state.maxValue) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(max = 240.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .verticalScroll(state)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text.trimEnd(),
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
