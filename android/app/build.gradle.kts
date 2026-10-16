@@ -68,7 +68,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.webkit())
     // Ekstraksi tar.gz rootfs Alpine (jalur hot: runtime DistroManager).
     implementation(libs.commons.compress)
     debugImplementation(libs.compose.ui.tooling)
