@@ -354,12 +354,15 @@ fun ChatScreen(
                     }
                 }
                 val lastStoredAssistant = messages.filterIsInstance<ChatItem.Assistant>().lastOrNull()
-                val storedHasText = lastStoredAssistant?.texts?.any { it.isNotBlank() } == true
-                // Cadangan anti-blank: bila server belum/tidak menyimpan teks balasan
-                // padahal streaming sudah menerimanya, tetap tampilkan teks live itu
-                // walau turn sudah selesai (busy = false). Inilah yang membuat balasan
-                // tidak lagi "hilang" begitu status berubah jadi idle.
-                val showLiveFallback = liveText.isNotBlank() && !storedHasText
+                val liveTrimmed = liveText.trim()
+                val lastStoredText = lastStoredAssistant?.texts?.joinToString("\n")?.trim().orEmpty()
+                // Teks live dianggap sudah tampil di pesan tersimpan bila pesan itu
+                // memuatnya (supaya tidak dobel). Kalau pesan tersimpan kosong/berbeda
+                // (turn sebelumnya, atau server belum menyimpan isi), teks live tetap
+                // ditampilkan — inilah cadangan anti-blank.
+                val liveAlreadyStored = liveTrimmed.isNotEmpty() &&
+                    lastStoredText.isNotEmpty() && lastStoredText.contains(liveTrimmed)
+                val showLiveFallback = liveTrimmed.isNotEmpty() && !liveAlreadyStored
                 if (busy) {
                     item("typing") {
                         if (showLiveFallback) {
