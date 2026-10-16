@@ -71,6 +71,7 @@ dependencies {
     // Ekstraksi tar.gz rootfs Alpine (jalur hot: runtime DistroManager).
     implementation(libs.commons.compress)
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }
 
 // ---------------------------------------------------------------------------

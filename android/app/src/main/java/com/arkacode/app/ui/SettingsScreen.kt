@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.EngineManager
+import com.arkacode.app.core.EngineRelease
 import com.arkacode.app.core.GitCredentials
 import com.arkacode.app.core.SecureStore
 import com.arkacode.app.core.SessionUiPrefs
@@ -55,20 +58,29 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onStop: (() -> Unit)? = null,
     onShowIntegrations: (() -> Unit)? = null,
+    engine: EngineManager? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val uiPrefs = remember { SessionUiPrefs(context) }
+    val eng = engine ?: remember { EngineManager(context) }
 
     var currentPort by remember { mutableStateOf(port) }
     var currentPassword by remember { mutableStateOf(password) }
     var gitPat by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf<String?>(null) }
     var showIntegrationsSheet by remember { mutableStateOf(false) }
+    var engineVersion by remember { mutableStateOf<String?>(null) }
+    var autoUpdate by remember { mutableStateOf(true) }
+    var engineBusy by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<EngineManager.Update?>(null) }
+    var engineMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             runCatching { SecureStore.getGitPat(context) }.getOrNull()?.let { gitPat = it }
+            runCatching { uiPrefs.autoUpdateEnabled() }.getOrNull()?.let { autoUpdate = it }
+            runCatching { eng.version() }.getOrNull()?.let { engineVersion = it }
         }
     }
 
@@ -167,6 +179,93 @@ fun SettingsScreen(
                                 }
                             }) { Text(I18n.s.saveKey) }
                             onStop?.let { stop -> TextButton(onClick = stop) { Text(I18n.s.stop) } }
+                        }
+                    }
+                }
+
+                ClayCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(I18n.s.settingsEngine, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            engineVersion?.let { I18n.s.engineInstalled(EngineRelease.bare(it)) }
+                                ?: I18n.s.engineNotInstalled,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(I18n.s.engineAutoUpdate, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = autoUpdate,
+                                enabled = !engineBusy,
+                                onCheckedChange = { v ->
+                                    autoUpdate = v
+                                    scope.launch { runCatching { uiPrefs.setAutoUpdateEnabled(v) } }
+                                },
+                            )
+                        }
+                        Text(
+                            I18n.s.engineAutoUpdateHelp,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        engineMsg?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        engineBusy = true
+                                        engineMsg = null
+                                        val u = withContext(Dispatchers.IO) { eng.checkUpdate() }
+                                        engineBusy = false
+                                        if (u == null) {
+                                            engineMsg = I18n.s.engineCheckFailed
+                                        } else {
+                                            updateInfo = u
+                                            engineVersion = u.current
+                                            engineMsg = if (u.hasUpdate) {
+                                                I18n.s.engineUpdateAvailable(
+                                                    EngineRelease.bare(u.latest),
+                                                    EngineRelease.bare(u.current ?: "?"),
+                                                )
+                                            } else {
+                                                I18n.s.engineUpToDate(EngineRelease.bare(u.latest))
+                                            }
+                                        }
+                                    }
+                                },
+                                enabled = !engineBusy,
+                            ) { Text(if (engineBusy) I18n.s.engineChecking else I18n.s.engineCheck) }
+                            if (updateInfo?.hasUpdate == true) {
+                                TextButton(
+                                    onClick = {
+                                        updateInfo?.let { u ->
+                                            scope.launch {
+                                                engineBusy = true
+                                                engineMsg = I18n.s.engineUpdating
+                                                val r = withContext(Dispatchers.IO) {
+                                                    eng.stopServer()
+                                                    eng.applyUpdate(u)
+                                                }
+                                                engineBusy = false
+                                                r.onSuccess { v ->
+                                                    engineVersion = v
+                                                    updateInfo = null
+                                                    engineMsg = I18n.s.engineUpdated(EngineRelease.bare(v))
+                                                    onStop?.invoke()
+                                                }.onFailure { e ->
+                                                    engineMsg = I18n.s.engineUpdateFailed(e.message ?: "?")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !engineBusy,
+                                ) { Text(I18n.s.engineUpdateNow) }
+                            }
                         }
                     }
                 }

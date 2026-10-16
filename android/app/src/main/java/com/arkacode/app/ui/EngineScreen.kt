@@ -83,6 +83,7 @@ fun EngineScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember { EngineManager(context) }
+    val uiPrefs = remember { com.arkacode.app.core.SessionUiPrefs(context) }
     var port by remember { mutableStateOf(EngineConfig.DEFAULT_PORT) }
     var password by remember { mutableStateOf(DEFAULT_PASSWORD) }
     var credsReady by remember { mutableStateOf(false) }
@@ -148,18 +149,55 @@ fun EngineScreen(
             }
             // 2. Engine
             if (!withContext(Dispatchers.IO) { engine.isDownloaded() }) {
-                log("mengunduh opencode ${EngineConfig.VERSION} (±60 MB)…")
+                log("mengunduh opencode terbaru (±60 MB)…")
                 var last = -1
-                val v = engine.ensureInstalled {
-                    if (it / 10 != last / 10) {
-                        last = it
-                        scope.launch { log("engine $it%") }
-                    }
+                val v = withContext(Dispatchers.IO) {
+                    engine.installLatest(
+                        onProgress = { p ->
+                            if (p / 10 != last / 10) {
+                                last = p
+                                scope.launch { log("engine $p%") }
+                            }
+                        },
+                        onLog = { m -> scope.launch { log(m) } },
+                    )
                 }.getOrThrow()
                 log("engine: $v")
             } else {
                 val v = withContext(Dispatchers.IO) { engine.version() } ?: "siap"
                 log("engine sudah ada ($v).")
+                // 2b. Auto-update engine (server belum jalan → aman ganti binary).
+                val auto = withContext(Dispatchers.IO) {
+                    runCatching { uiPrefs.autoUpdateEnabled() }.getOrDefault(true)
+                }
+                if (auto) {
+                    log("cek pembaruan opencode…")
+                    val u = withContext(Dispatchers.IO) { engine.checkUpdate() }
+                    when {
+                        u == null -> log("gagal cek pembaruan (offline?).")
+                        !u.hasUpdate -> log("opencode sudah terbaru (${u.latest}).")
+                        else -> {
+                            log("pembaruan tersedia: ${u.current ?: "?"} → ${u.latest}. Mengunduh…")
+                            var last = -1
+                            withContext(Dispatchers.IO) {
+                                engine.applyUpdate(
+                                    u,
+                                    onProgress = { p ->
+                                        if (p / 10 != last / 10) {
+                                            last = p
+                                            scope.launch { log("update $p%") }
+                                        }
+                                    },
+                                    onLog = { m -> scope.launch { log(m) } },
+                                )
+                            }.onSuccess { log("opencode diperbarui ke ${u.latest}.") }
+                                .onFailure { log("pembaruan gagal: ${it.message ?: "?"} - lanjut versi lama.") }
+                        }
+                    }
+                    withContext(Dispatchers.IO) {
+                        runCatching { uiPrefs.setLastUpdateCheck(System.currentTimeMillis()) }
+                    }
+                }
             }
             // 3. Start + health (termasuk pasang lib C++ sekali bila perlu)
             log("menyalakan server di port $port…")
@@ -217,6 +255,7 @@ fun EngineScreen(
                 SettingsScreen(
                     port = port,
                     password = password,
+                    engine = engine,
                     isDark = darkTheme,
                     onToggleTheme = onToggleTheme,
                     onBack = { showSettings = false },

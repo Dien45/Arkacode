@@ -187,6 +187,21 @@ data class Strings(
     val gitPatPlaceholder: String,
     val gitPatSaved: String,
     val gitPatDeleted: String,
+    // engine update
+    val settingsEngine: String,
+    val engineInstalled: (String) -> String,
+    val engineNotInstalled: String,
+    val engineAutoUpdate: String,
+    val engineAutoUpdateHelp: String,
+    val engineCheck: String,
+    val engineChecking: String,
+    val engineUpToDate: (String) -> String,
+    val engineUpdateAvailable: (String, String) -> String,
+    val engineUpdateNow: String,
+    val engineUpdating: String,
+    val engineUpdated: (String) -> String,
+    val engineUpdateFailed: (String) -> String,
+    val engineCheckFailed: String,
 )
 
 private val id = Strings(
@@ -356,6 +371,20 @@ private val id = Strings(
     gitPatPlaceholder = "ghp_... atau token klasik",
     gitPatSaved = "GitHub PAT tersimpan & disinkronkan.",
     gitPatDeleted = "GitHub PAT dihapus.",
+    settingsEngine = "Engine opencode",
+    engineInstalled = { v -> "Terpasang: v$v" },
+    engineNotInstalled = "Belum terpasang",
+    engineAutoUpdate = "Perbarui otomatis",
+    engineAutoUpdateHelp = "Saat app dibuka, cek rilis opencode terbaru dan pasang otomatis bila ada.",
+    engineCheck = "Cek pembaruan",
+    engineChecking = "Memeriksa…",
+    engineUpToDate = { v -> "Sudah terbaru (v$v)." },
+    engineUpdateAvailable = { latest, cur -> "Tersedia v$latest (kini v$cur)." },
+    engineUpdateNow = "Perbarui sekarang",
+    engineUpdating = "Memperbarui…",
+    engineUpdated = { v -> "Diperbarui ke v$v. Server dihentikan - start ulang." },
+    engineUpdateFailed = { m -> "Gagal memperbarui: $m" },
+    engineCheckFailed = "Gagal cek pembaruan (offline?).",
 )
 
 private val en = Strings(
@@ -525,6 +554,20 @@ private val en = Strings(
     gitPatPlaceholder = "ghp_... or classic token",
     gitPatSaved = "GitHub PAT saved & synced.",
     gitPatDeleted = "GitHub PAT removed.",
+    settingsEngine = "opencode engine",
+    engineInstalled = { v -> "Installed: v$v" },
+    engineNotInstalled = "Not installed",
+    engineAutoUpdate = "Auto-update",
+    engineAutoUpdateHelp = "On app launch, check for the newest opencode release and install it automatically.",
+    engineCheck = "Check for update",
+    engineChecking = "Checking…",
+    engineUpToDate = { v -> "Already up to date (v$v)." },
+    engineUpdateAvailable = { latest, cur -> "v$latest available (currently v$cur)." },
+    engineUpdateNow = "Update now",
+    engineUpdating = "Updating…",
+    engineUpdated = { v -> "Updated to v$v. Server stopped - start again." },
+    engineUpdateFailed = { m -> "Update failed: $m" },
+    engineCheckFailed = "Update check failed (offline?).",
 )
 
 /** Registry bahasa global (state Compose → recompose otomatis saat diganti). */
