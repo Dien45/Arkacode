@@ -1,7 +1,9 @@
 package com.arkacode.app.core
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
@@ -65,5 +67,27 @@ class SessionUiPrefs(private val context: Context) {
 
     suspend fun setLangCode(code: String) {
         context.uiPrefsStore.edit { it[stringPreferencesKey("lang_code")] = code }
+    }
+
+    // --- Pembaruan engine opencode (F-update) -------------------------------
+
+    /** Auto-update engine saat boot; default aktif. */
+    suspend fun autoUpdateEnabled(): Boolean =
+        context.uiPrefsStore.data.map { prefs ->
+            prefs[booleanPreferencesKey("engine_auto_update")] ?: true
+        }.first()
+
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) {
+        context.uiPrefsStore.edit { it[booleanPreferencesKey("engine_auto_update")] = enabled }
+    }
+
+    /** Epoch ms cek pembaruan terakhir (0 = belum pernah). */
+    suspend fun lastUpdateCheck(): Long =
+        context.uiPrefsStore.data.map { prefs ->
+            prefs[longPreferencesKey("engine_last_check")] ?: 0L
+        }.first()
+
+    suspend fun setLastUpdateCheck(epochMs: Long) {
+        context.uiPrefsStore.edit { it[longPreferencesKey("engine_last_check")] = epochMs }
     }
 }

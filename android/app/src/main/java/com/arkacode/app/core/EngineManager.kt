@@ -23,12 +23,12 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
  * - Server dipegang sebagai [Process] + log append ke `serve.log`.
  */
 object EngineConfig {
-    const val VERSION = "v1.19.0"
+    const val VERSION = "v1.19.1"
     // Build musl = cocok untuk Alpine; fallback build gnu bila musl bermasalah.
     const val ASSET_MUSL = "opencode-linux-arm64-musl.tar.gz"
-    const val ASSET_MUSL_SHA256 = "c864e28b1504fe4412d9495493e72b8ebf3e205dd1ee14d125b99c14b26623da"
+    const val ASSET_MUSL_SHA256 = "a23fad97cdac6f4c767d06709b941f00ae583eb8bf06183a0d3dc7ec0bd2d287"
     const val ASSET_GNU = "opencode-linux-arm64.tar.gz"
-    const val ASSET_GNU_SHA256 = "e9841d43d3e1a8f36ed2691592d3b8b4fb097e606c8b559a277a1b845840e26b"
+    const val ASSET_GNU_SHA256 = "3840e9afb2462a666d31816b20bc13b91af9845c329cff660a972aa9cfaee3a2"
     const val DEFAULT_PORT = 4096
     const val DEFAULT_HOST = "127.0.0.1"
 
@@ -158,6 +158,7 @@ class EngineManager(private val context: Context) {
             "PROOT_LOADER=${loader.absolutePath}",
             "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
             "PROOT_NO_SECCOMP=1",
+            "OPENCODE_DISABLE_AUTOUPDATE=1",
         )
     }
 
@@ -239,7 +240,9 @@ class EngineManager(private val context: Context) {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun extractBinary(tarGzFile: File) {
+    private fun extractBinary(tarGzFile: File) = extractBinaryTo(tarGzFile, binaryFile())
+
+    private fun extractBinaryTo(tarGzFile: File, target: File) {
         var found = false
         GzipCompressorInputStream(BufferedInputStream(tarGzFile.inputStream())).use { gz ->
             TarArchiveInputStream(gz).use { tar ->
@@ -248,9 +251,9 @@ class EngineManager(private val context: Context) {
                     if (entry.isDirectory) continue
                     val name = entry.name.substringAfterLast('/')
                     if (name == "opencode") {
-                        val out = binaryFile()
-                        FileOutputStream(out).use { o -> tar.copyTo(o) }
-                        out.setExecutable(true, true)
+                        target.parentFile?.mkdirs()
+                        FileOutputStream(target).use { o -> tar.copyTo(o) }
+                        target.setExecutable(true, true)
                         found = true
                         break
                     }
@@ -258,8 +261,162 @@ class EngineManager(private val context: Context) {
             }
         }
         if (!found) throw IllegalStateException("Arsip tidak berisi binary opencode")
-        if (!binaryFile().canExecute()) throw IllegalStateException("Binary tidak bisa di-exec")
+        if (!target.canExecute()) throw IllegalStateException("Binary tidak bisa di-exec")
     }
+
+    // --------------------------------------------------------- pembaruan (update)
+
+    /** Hasil cek pembaruan: versi terpasang vs rilis terbaru + digest aset. */
+    data class Update(
+        val current: String?,
+        val latest: String,
+        val hasUpdate: Boolean,
+        val assets: Map<String, String?>,
+    )
+
+    /**
+     * Cek rilis terbaru opencode (tag via redirect tanpa API; digest via API).
+     * Null bila gagal jaringan / tag tak terbaca.
+     */
+    suspend fun checkUpdate(): Update? = withContext(Dispatchers.IO) {
+        runCatching {
+            val latest = EngineRelease.latestTag() ?: return@runCatching null
+            val current = version() ?: EngineConfig.VERSION
+            val hasUpdate = EngineRelease.isNewer(latest, current)
+            // Digest hanya diambil lewat API bila memang ada pembaruan (hemat kuota API).
+            val assets = if (hasUpdate) {
+                runCatching { EngineRelease.releaseAssets(latest) }.getOrNull() ?: emptyMap()
+            } else {
+                emptyMap()
+            }
+            Update(
+                current = current,
+                latest = latest,
+                hasUpdate = hasUpdate,
+                assets = assets,
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * Pasang rilis [tag]: unduh aset cocok-ABI (musl, lalu gnu), verifikasi sha256
+     * bila tersedia, ekstrak ke `opencode.new`, tukar atomik dengan backup, lalu
+     * verifikasi `--version` = tag. Menolak bila server sedang jalan (file dipakai).
+     */
+    private suspend fun installRelease(
+        tag: String,
+        candidates: List<String>,
+        digests: Map<String, String?>,
+        onProgress: (Int) -> Unit,
+        onLog: (String) -> Unit,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            check(!isRunning()) { "Server sedang jalan - hentikan dulu sebelum memperbarui." }
+            val dl = File(engineDir, "opencode.download.tgz")
+            val newBin = File(engineDir, "opencode.new")
+            runCatching { dl.delete() }
+            runCatching { newBin.delete() }
+
+            var lastError: Exception? = null
+            var used: String? = null
+            for (name in candidates) {
+                try {
+                    onProgress(0)
+                    onLog("mengunduh $name...")
+                    download(EngineRelease.downloadUrl(tag, name), dl, onProgress)
+                    val expected = digests[name]
+                    if (expected != null) {
+                        val actual = sha256Hex(dl)
+                        if (!actual.equals(expected, ignoreCase = true)) {
+                            throw IllegalStateException("checksum $name tidak cocok")
+                        }
+                    } else {
+                        onLog("catatan: sha256 $name tidak tersedia dari rilis - verifikasi via --version.")
+                    }
+                    onProgress(92)
+                    extractBinaryTo(dl, newBin)
+                    used = name
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                }
+            }
+            if (used == null || !newBin.isFile) {
+                throw lastError ?: IllegalStateException("Unduhan rilis gagal")
+            }
+
+            // Tukar atomik: lama -> .bak, baru -> opencode.
+            val bin = binaryFile()
+            val bak = File(engineDir, "opencode.bak")
+            runCatching { bak.delete() }
+            val hadOld = bin.isFile
+            if (hadOld && !bin.renameTo(bak)) {
+                throw IllegalStateException("gagal memindahkan binary lama")
+            }
+            if (!newBin.renameTo(bin)) {
+                if (hadOld) runCatching { bak.renameTo(bin) }
+                throw IllegalStateException("gagal memasang binary baru")
+            }
+            bin.setExecutable(true, true)
+
+            // Pastikan lib C++ (libstdc++/libgcc) ada agar binary bisa `--version`
+            // di distro yang baru dipasang (best-effort; marker membuatnya no-op).
+            runCatching { ensureGuestLibs() }
+
+            // Verifikasi: binary baru harus melaporkan versi = tag.
+            onProgress(97)
+            val v = version()
+            if (v == null || !EngineRelease.sameVersion(v, tag)) {
+                runCatching { bin.delete() }
+                if (hadOld) runCatching { bak.renameTo(bin) }
+                throw IllegalStateException("verifikasi gagal (--version: ${v ?: "tidak terbaca"})")
+            }
+            runCatching { bak.delete() }
+            runCatching { File(engineDir, "asset.txt").writeText(used) }
+            runCatching { dl.delete() }
+            runCatching { newBin.delete() }
+            onProgress(100)
+            v
+        }
+    }
+
+    /**
+     * Unduh rilis terbaru bila tersedia; kalau tidak (offline/tak terbaca),
+     * jatuh ke [ensureInstalled] (versi pin bawaan). Untuk instalasi pertama.
+     */
+    suspend fun installLatest(
+        onProgress: (Int) -> Unit = {},
+        onLog: (String) -> Unit = {},
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val rel = runCatching { EngineRelease.latestRelease() }.getOrNull()
+        if (rel != null) {
+            val r = installRelease(
+                tag = rel.tag,
+                candidates = EngineRelease.assetCandidates(distro.abi),
+                digests = rel.assets,
+                onProgress = onProgress,
+                onLog = onLog,
+            )
+            if (r.isSuccess) return@withContext r
+            onLog("unduh rilis terbaru gagal: ${r.exceptionOrNull()?.message ?: "?"}; coba versi bawaan.")
+        } else {
+            onLog("riwayat rilis tak terbaca (offline?) - pakai versi bawaan ${EngineConfig.VERSION}.")
+        }
+        ensureInstalled(onProgress)
+    }
+
+    /** Terapkan pembaruan hasil [checkUpdate] (unduh + verifikasi + tukar atomik). */
+    suspend fun applyUpdate(
+        update: Update,
+        onProgress: (Int) -> Unit = {},
+        onLog: (String) -> Unit = {},
+    ): Result<String> = installRelease(
+        tag = update.latest,
+        candidates = EngineRelease.assetCandidates(distro.abi),
+        digests = update.assets,
+        onProgress = onProgress,
+        onLog = onLog,
+    )
 
     fun distroStatus(): DistroStatus = distro.status()
 
@@ -414,6 +571,7 @@ class EngineManager(private val context: Context) {
             "PROOT_LOADER=${loader.absolutePath}",
             "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
             "PROOT_NO_SECCOMP=1",
+            "OPENCODE_DISABLE_AUTOUPDATE=1",
             "OPENCODE_SERVER_PASSWORD=$password",
         ) + extraEnv.map { (k, v) -> "$k=$v" } + listOf(
             "/opt/arkacode/opencode",
