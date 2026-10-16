@@ -129,6 +129,7 @@ data class Strings(
     val modelsCount: (Int) -> String,
     val searchHint: String,
     val noModels: String,
+    val unsupportedHidden: (Int) -> String,
     val activeBadge: String,
     // custom providers (OpenAI-compatible)
     val customProvidersTitle: String,
@@ -322,6 +323,7 @@ private val id = Strings(
     modelsCount = { "$it model" },
     searchHint = "Cari…",
     noModels = "Tidak ada model dari server. Pastikan penyedia sudah dikonfigurasi (butuh login/API key di server opencode).",
+    unsupportedHidden = { "$it model disembunyikan (tak didukung engine)" },
     activeBadge = "Aktif",
     customProvidersTitle = "Provider kustom (OpenAI-compatible)",
     customProvidersHelp = "Endpoint /v1 bergaya OpenAI: LM Studio, llama.cpp, vLLM, Ollama, OpenRouter, dll. Ditulis ke opencode.json server \u2014 Stop \u2192 Start ulang agar berlaku.",
@@ -511,6 +513,7 @@ private val en = Strings(
     modelsCount = { "$it model(s)" },
     searchHint = "Search…",
     noModels = "No models from the server. Make sure a provider is configured (needs login/API key on the opencode server).",
+    unsupportedHidden = { "$it model(s) hidden (unsupported by engine)" },
     activeBadge = "Active",
     customProvidersTitle = "Custom providers (OpenAI-compatible)",
     customProvidersHelp = "OpenAI-style /v1 endpoints: LM Studio, llama.cpp, vLLM, Ollama, OpenRouter, etc. Written to the server's opencode.json \u2014 Stop \u2192 Start to apply.",

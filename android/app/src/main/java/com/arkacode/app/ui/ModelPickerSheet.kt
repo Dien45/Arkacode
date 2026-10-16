@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.ModelSupport
 import com.arkacode.app.net.ModelInfo
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.ProviderInfo
@@ -84,7 +85,8 @@ fun ModelPickerContent(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            val all = models
+            val raw = models
+            val all = raw?.let { ModelSupport.visibleModels(it) }
             if (all == null) {
                 Text(I18n.s.loading, style = MaterialTheme.typography.bodyMedium)
             } else if (all.isEmpty()) {
@@ -93,6 +95,14 @@ fun ModelPickerContent(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
+                val hidden = raw?.let { ModelSupport.unsupportedCount(it) } ?: 0
+                if (hidden > 0) {
+                    Text(
+                        I18n.s.unsupportedHidden(hidden),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 val filtered = remember(all, query) {
                     if (query.isBlank()) all
                     else all.filter {

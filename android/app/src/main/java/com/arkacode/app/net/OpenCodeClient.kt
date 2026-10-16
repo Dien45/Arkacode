@@ -558,7 +558,8 @@ class OpenCodeClient(
                 val out = (co["output"] as? JsonPrimitive)?.doubleOrNull ?: Double.NaN
                 !inp.isNaN() && !out.isNaN() && inp == 0.0 && out == 0.0
             }
-            ModelInfo(mid, o.str("name") ?: mid, pid, free)
+            val apiType = o.obj("api").str("type")
+            ModelInfo(mid, o.str("name") ?: mid, pid, free, apiType, o.str("status"))
         }
     }
 

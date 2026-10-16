@@ -29,7 +29,16 @@ sealed interface ChatItem {
     data class Note(override val id: String, val text: String) : ChatItem
 }
 
-data class ModelInfo(val id: String, val name: String, val providerID: String, val free: Boolean = false)
+data class ModelInfo(
+    val id: String,
+    val name: String,
+    val providerID: String,
+    val free: Boolean = false,
+    /** Jenis API model di server (`aisdk` didukung; `native` tak didukung engine). */
+    val apiType: String? = null,
+    /** `active` | `deprecated` (bila ada). */
+    val status: String? = null,
+)
 
 /** Agent opencode (mode primary/subagent/all). */
 data class AgentInfo(
