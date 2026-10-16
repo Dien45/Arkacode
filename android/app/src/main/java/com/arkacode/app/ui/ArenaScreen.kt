@@ -3,26 +3,95 @@ package com.arkacode.app.ui
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.webkit.WebResourceRequest
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+
+private const val ARENA_URL = "https://arena.ai/"
+
+/**
+ * Pembuka Arena AI.
+ *
+ * Website Arena AI diproteksi reCAPTCHA Enterprise yang memakai Storage Access
+ * API — API itu ditolak oleh WebView bawaan (pesan `requestStorageAccess:
+ * Permission denied`), sehingga isi halaman tak pernah muncul (layar kosong).
+ * Chrome (Custom Tab) melewati proteksi itu dengan normal.
+ *
+ * Karena itu Arena dibuka lewat Chrome Custom Tab (tetap di dalam aplikasi,
+ * berbagi cookie/login Chrome). Bila tak ada browser yang mendukung, baru
+ * jatuh ke WebView bawaan [ArenaScreenActivity] sebagai cadangan.
+ */
+object ArenaLauncher {
+    const val URL = ARENA_URL
+
+    fun open(context: Context) {
+        val uri = Uri.parse(URL)
+        val launched = runCatching {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setUrlBarHidingEnabled(true)
+                .build()
+                .launchUrl(context, uri)
+        }.isSuccess
+        if (launched) return
+
+        val opened = runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }.isSuccess
+        if (opened) return
+
+        runCatching { context.startActivity(Intent(context, ArenaScreenActivity::class.java)) }
+            .onFailure {
+                Toast.makeText(context, "Tidak ada browser terpasang", Toast.LENGTH_LONG).show()
+            }
+    }
+}
 
 /**
  * Layar WebView bawaan untuk https://arena.ai/.
@@ -30,28 +99,34 @@ import androidx.compose.ui.viewinterop.AndroidView
  * - Muat website Arena AI asli (tanpa API key, login lewat browser).
  * - Cookie & localStorage disimpan internal WebView → sesi login tetap
  *   walau aplikasi ditutup dan dibuka lagi.
+ * - Ada indikator muat + status galat dengan tombol Coba lagi / Buka di
+ *   browser, supaya layar tak pernah tinggal kosong tanpa kejelasan.
  * - Tangkap unduhan (download) → simpan ke folder /Download Android.
  *   Hasil unduhan nanti diimpor ke workspace proot via ArenaDownloadBridge.
  */
 class ArenaScreenActivity : ComponentActivity() {
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    ArenaWebView()
-                }
+                ArenaWebView(onClose = { finish() })
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ArenaWebView() {
+fun ArenaWebView(onClose: () -> Unit) {
     val context = LocalContext.current
+
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf(0) }
+    var lastUrl by remember { mutableStateOf(ARENA_URL) }
 
     val webView = remember {
         WebView(context).apply {
@@ -59,10 +134,15 @@ fun ArenaWebView() {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
+                // Biarkan UA bawaan WebView (sesuai versi engine asli) agar
+                // proteksi bot/CDN tidak menolak UA palsu yang tak cocok.
+                userAgentString = userAgentString.replace("; wv", "")
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                setSupportZoom(true)
+                builtInZoomControls = true
+                displayZoomControls = false
                 setCacheMode(WebSettings.LOAD_DEFAULT)
-                userAgentString =
-                    "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             }
 
             // Cookie agar login Arena AI tidak hilang saat tutup-buka aplikasi.
@@ -74,27 +154,70 @@ fun ArenaWebView() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
-                    request: WebResourceRequest?
+                    request: WebResourceRequest
                 ): Boolean {
+                    lastUrl = request.url.toString()
                     return false
+                }
+
+                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                    lastUrl = url ?: lastUrl
+                    loading = true
+                    error = null
+                }
+
+                override fun onPageFinished(view: WebView, url: String?) {
+                    loading = false
                 }
 
                 override fun onReceivedError(
                     view: WebView,
-                    errorCode: Int,
-                    description: String,
-                    failingUrl: String
+                    request: WebResourceRequest,
+                    errorRes: WebResourceError
                 ) {
-                    Toast.makeText(
-                        context,
-                        "Gagal memuat Arena AI: $description",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    if (request.isForMainFrame) {
+                        loading = false
+                        error = "Gagal memuat Arena AI: ${errorRes.description}"
+                    }
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: android.webkit.WebResourceResponse
+                ) {
+                    if (request.isForMainFrame) {
+                        loading = false
+                        error = "Server Arena AI membalas HTTP ${errorResponse.statusCode}"
+                    }
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: RenderProcessGoneDetail
+                ): Boolean {
+                    error = "Proses tampilan WebView berhenti. Tekan Coba lagi."
+                    loading = false
+                    return true
                 }
             }
 
-            setDownloadListener(object : android.webkit.DownloadListener {
-                override fun onDownloadStart(
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
+                    Log.i(
+                        "ArenaWV",
+                        "${msg.messageLevel()} ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}"
+                    )
+                    return true
+                }
+
+                override fun onProgressChanged(view: WebView, newProgress: Int) {
+                    progress = newProgress
+                    if (newProgress >= 100) loading = false
+                }
+            }
+
+            setDownloadListener(object : android.webkit.DownloadListener {                override fun onDownloadStart(
                     url: String,
                     userAgent: String?,
                     contentDisposition: String?,
@@ -128,12 +251,95 @@ fun ArenaWebView() {
                 }
             })
 
-            loadUrl("https://arena.ai/")
+            loadUrl(ARENA_URL)
         }
     }
 
-    AndroidView(
-        factory = { webView },
-        modifier = Modifier.fillMaxSize()
-    )
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(I18n.s.arenaTitle) },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kembali"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            error = null
+                            loading = true
+                            webView.reload()
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Muat ulang")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            if (loading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            val err = error
+            if (err != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = err,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = {
+                            error = null
+                            loading = true
+                            webView.loadUrl(lastUrl)
+                        },
+                        modifier = Modifier.padding(top = 16.dp)
+                    ) {
+                        Text("Coba lagi")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(lastUrl))
+                                )
+                            }.onFailure {
+                                Toast.makeText(
+                                    context,
+                                    "Tidak ada browser terpasang",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                        Text("Buka di browser", modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            } else {
+                AndroidView(
+                    factory = { webView },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
 }
