@@ -1,6 +1,7 @@
 package com.arkacode.app.net
 
 import com.arkacode.app.core.Attachment
+import com.arkacode.app.core.normalizeFsPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -143,7 +144,7 @@ class OpenCodeClient(
         val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
         data.mapNotNull { item ->
             val o = item as? JsonObject ?: return@mapNotNull null
-            val rel = o.str("path") ?: return@mapNotNull null
+            val rel = o.str("path")?.let { normalizeFsPath(it) } ?: return@mapNotNull null
             FsEntry(rel, o.str("type") == "directory")
         }
     }
@@ -168,7 +169,7 @@ class OpenCodeClient(
         val data = (el as? JsonObject)?.let { it.dataArray() } ?: return@withContext emptyList()
         data.mapNotNull { item ->
             val o = item as? JsonObject ?: return@mapNotNull null
-            val rel = o.str("path") ?: return@mapNotNull null
+            val rel = o.str("path")?.let { normalizeFsPath(it) } ?: return@mapNotNull null
             FsEntry(rel, o.str("type") == "directory")
         }
     }

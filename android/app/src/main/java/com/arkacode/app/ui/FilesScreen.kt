@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.fileLeafName
 import com.arkacode.app.net.FsEntry
 import com.arkacode.app.net.OpenCodeClient
 import kotlinx.coroutines.Job
@@ -154,7 +155,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     TextButton(onClick = { openedPath = null }) { Text(I18n.s.backToList) }
                 }
                 Text(
-                    if (openedPath != null) openedPath!!.substringAfterLast('/') else I18n.s.filesTitle,
+                    if (openedPath != null) fileLeafName(openedPath!!) else I18n.s.filesTitle,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
@@ -261,7 +262,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                                 Text(if (e.isDir) "📁" else "📄")
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    e.path.substringAfterLast('/'),
+                                    fileLeafName(e.path),
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     modifier = Modifier.weight(1f),
