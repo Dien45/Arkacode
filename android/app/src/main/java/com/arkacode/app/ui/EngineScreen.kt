@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.arkacode.app.core.DistroManager
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
 import com.arkacode.app.core.SessionRunRegistry
@@ -58,6 +59,7 @@ import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.net.ChatSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -231,7 +233,12 @@ fun EngineScreen(
         is Screen.Ready -> {
             val target = chatTarget
             val chatClient = remember(port, password) { OpenCodeClient(port = port, password = password) }
-            val runs = remember(chatClient) { SessionRunRegistry(scope, chatClient) }
+            val rootfsDir = remember(context) {
+                File(File(context.filesDir, "distro"), DistroManager.DISTRO_NAME)
+            }
+            val runs = remember(chatClient, rootfsDir) {
+                SessionRunRegistry(scope, chatClient, rootfsDir)
+            }
             BackHandler(enabled = showCaps || showProviders || showSettings || target != null) {
                 when {
                     showCaps -> showCaps = false

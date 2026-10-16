@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Status "turn berjalan" untuk SATU sesi. Dimiliki [SessionRunRegistry] yang
@@ -47,9 +48,14 @@ class SessionRun {
 class SessionRunRegistry(
     private val scope: CoroutineScope,
     private val client: OpenCodeClient,
+    /** Rootfs Alpine di disk app — untuk men-tail file stdout shell (`.out`) realtime. */
+    private val rootfsDir: File? = null,
 ) {
     private val runs = LinkedHashMap<String, SessionRun>()
     private var eventsJob: Job? = null
+
+    /** Job tail output shell, kunci `"<sessionId>/<toolId>"`. */
+    private val tails = HashMap<String, Job>()
 
     fun run(sessionId: String): SessionRun = runs.getOrPut(sessionId) { SessionRun() }
 
@@ -105,23 +111,17 @@ class SessionRunRegistry(
     }
 
     /** Terapkan satu event SSE ke state run terkait. */
-    private fun applyEvent(ev: ServerEvent) {
+    internal fun applyEvent(ev: ServerEvent) {
+        // shell.exited tidak membawa sessionID — cocokkan lewat shellId ke semua run.
+        if (ev is ServerEvent.Tool && ev.sessionID == null && ev.shellId != null) {
+            for ((sidKey, r) in runs) if (applyShellExit(r, sidKey, ev)) return
+            return
+        }
         val sid = ev.sessionID ?: return
         if (!runs.containsKey(sid)) return
         val r = run(sid)
         when (ev) {
-                    is ServerEvent.Tool -> {
-                        if (ev.label.isNotBlank()) r.toolLabel.value = ev.label
-                        if (ev.status.isNotBlank()) {
-                            val key = ev.id.ifBlank { "live-" + ev.label.ifBlank { "tool" } }
-                            val cur = r.liveTools.value.toMutableList()
-                            val i = cur.indexOfFirst { it.id == key }
-                            val name = ev.label.ifBlank { cur.getOrNull(i)?.name ?: "tool" }
-                            val entry = ToolUse(key, name, ev.status)
-                            if (i >= 0) cur[i] = entry else cur.add(entry)
-                            r.liveTools.value = cur
-                        }
-                    }
+                    is ServerEvent.Tool -> applyTool(sid, r, ev)
                     is ServerEvent.TextDelta -> r.liveText.value += ev.delta
                     is ServerEvent.TextEnded -> if (ev.text.isNotBlank()) r.liveText.value = ev.text
                     is ServerEvent.ReasoningDelta -> r.liveReasoning.value += ev.delta
@@ -136,10 +136,129 @@ class SessionRunRegistry(
                         r.justSent.value = null
                         r.toolLabel.value = null
                         r.liveTools.value = emptyList()
+                        stopTails(sid)
                     }
                     is ServerEvent.Error -> r.error.value = ev.message
                     else -> {}
                 }
+    }
+
+    /** Gabungkan event tool ke daftar [SessionRun.liveTools] (per id call). */
+    internal fun applyTool(sid: String, r: SessionRun, ev: ServerEvent.Tool) {
+        if (ev.label.isNotBlank()) r.toolLabel.value = ev.label
+        // shell.created: tempelkan file stdout ke tool shell yang sedang jalan lalu mulai tail.
+        if (ev.shellFile != null) {
+            attachShell(sid, r, ev)
+            return
+        }
+        // shell.exited tanpa status/output/detail: tandai selesai + hentikan tail.
+        if (ev.shellId != null && ev.status.isBlank() && ev.detail == null && ev.output == null && ev.id.isBlank()) {
+            applyShellExit(r, sid, ev)
+            return
+        }
+        if (ev.id.isBlank() && ev.label.isBlank() && ev.status.isBlank() &&
+            ev.detail == null && ev.output == null
+        ) return
+        val key = ev.id.ifBlank { "live" }
+        val cur = r.liveTools.value.toMutableList()
+        val i = cur.indexOfFirst { it.id == key }
+        cur.setOrAdd(i, merge(cur.getOrNull(i), ev))
+        r.liveTools.value = cur
+        if (cur[if (i >= 0) i else cur.size - 1].status in TERMINAL_TOOL) stopTail(sid, key)
+    }
+
+    private fun MutableList<ToolUse>.setOrAdd(index: Int, value: ToolUse) {
+        if (index >= 0) this[index] = value else add(value)
+    }
+
+    /** shell.created → tempel path file `.out` ke tool shell aktif lalu tail live. */
+    private fun attachShell(sid: String, r: SessionRun, ev: ServerEvent.Tool) {
+        val cur = r.liveTools.value.toMutableList()
+        val i = cur.indexOfLast { it.status == "running" && it.shellFile == null }
+        val attached = if (i >= 0) {
+            cur[i] = cur[i].copy(
+                name = cur[i].name.ifBlank { "shell" },
+                detail = ev.detail ?: cur[i].detail,
+                shellId = ev.shellId,
+                shellFile = ev.shellFile,
+            )
+            cur[i]
+        } else {
+            ToolUse(
+                id = "shell-" + (ev.shellId ?: System.currentTimeMillis().toString()),
+                name = "shell",
+                status = "running",
+                detail = ev.detail,
+                shellId = ev.shellId,
+                shellFile = ev.shellFile,
+            ).also { cur.add(it) }
+        }
+        r.liveTools.value = cur
+        startTail(sid, r, attached)
+    }
+
+    /** Cocokkan shell.exited ke tool lewat shellId; true bila ketemu. */
+    private fun applyShellExit(r: SessionRun, sid: String, ev: ServerEvent.Tool): Boolean {
+        val shellId = ev.shellId ?: return false
+        val cur = r.liveTools.value.toMutableList()
+        val i = cur.indexOfFirst { it.shellId == shellId }
+        if (i < 0) return false
+        cur[i] = cur[i].copy(exit = ev.exit ?: cur[i].exit)
+        r.liveTools.value = cur
+        stopTail(sid, cur[i].id)
+        return true
+    }
+
+    /** Gabungkan event baru dengan entri lama (field kosong tidak menimpa). */
+    private fun merge(old: ToolUse?, ev: ServerEvent.Tool): ToolUse = ToolUse(
+        id = ev.id.ifBlank { old?.id ?: "live" },
+        name = ev.label.ifBlank { old?.name ?: "tool" },
+        status = ev.status.ifBlank { old?.status ?: "running" },
+        detail = ev.detail ?: old?.detail,
+        output = ev.output ?: old?.output ?: "",
+        exit = ev.exit ?: old?.exit,
+        truncated = ev.truncated || (old?.truncated ?: false),
+        shellId = ev.shellId ?: old?.shellId,
+        shellFile = ev.shellFile ?: old?.shellFile,
+    )
+
+    /**
+     * Tail file stdout shell (`.out`) dari disk app: file tumbuh seiring proses
+     * menulis, jadi membaca berulang memberi output realtime tanpa event server.
+     */
+    private fun startTail(sid: String, r: SessionRun, tool: ToolUse) {
+        val file = tool.shellFile ?: return
+        val root = rootfsDir ?: return
+        val key = "$sid/${tool.id}"
+        if (tails[key]?.isActive == true) return
+        val host = File(root, file.trimStart('/'))
+        tails[key] = scope.launch {
+            var lastLen = -1
+            while (isActive) {
+                val txt = runCatching { host.readText() }.getOrNull()
+                if (txt != null && txt.length != lastLen) {
+                    lastLen = txt.length
+                    updateToolOutput(r, tool.id, txt)
+                }
+                delay(TAIL_MS)
+            }
+        }
+    }
+
+    private fun updateToolOutput(r: SessionRun, toolId: String, text: String) {
+        val cur = r.liveTools.value.toMutableList()
+        val i = cur.indexOfFirst { it.id == toolId }
+        if (i < 0 || cur[i].output == text) return
+        cur[i] = cur[i].copy(output = text)
+        r.liveTools.value = cur
+    }
+
+    private fun stopTail(sid: String, toolId: String) {
+        tails.remove("$sid/$toolId")?.cancel()
+    }
+
+    private fun stopTails(sid: String) {
+        tails.keys.filter { it.startsWith("$sid/") }.forEach { tails.remove(it)?.cancel() }
     }
 
     fun clearError(sessionId: String) {
@@ -164,6 +283,7 @@ class SessionRunRegistry(
         r.liveTools.value = emptyList()
         r.toolLabel.value = null
         r.preIds = snapshotPreIds(r.messages.value)
+        stopTails(sessionId)
         r.pollJob?.cancel()
         r.pollJob = scope.launch {
             try {
@@ -192,6 +312,7 @@ class SessionRunRegistry(
         r.liveTools.value = emptyList()
         r.toolLabel.value = null
         r.justSent.value = null
+        stopTails(sessionId)
         scope.launch {
             runCatching { client.interrupt(sessionId) }
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
@@ -260,6 +381,7 @@ class SessionRunRegistry(
             r.justSent.value = null
             r.toolLabel.value = null
             r.liveTools.value = emptyList()
+            stopTails(sessionId)
             // liveText sengaja TIDAK dibersihkan di sini: ChatScreen memakainya
             // sebagai cadangan bila pesan tersimpan tak memuat teks balasan.
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
@@ -294,5 +416,7 @@ class SessionRunRegistry(
         const val SETTLE_TRIES = 8
         const val SETTLE_MS = 700L
         const val MAX_FETCH_FAILS = 5
+        const val TAIL_MS = 350L
+        val TERMINAL_TOOL = setOf("completed", "error")
     }
 }
