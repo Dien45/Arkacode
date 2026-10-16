@@ -30,7 +30,7 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace -Pproot.skip=true --info
+        run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace
 
       # Task downloadProotBinaries mengambil binary proot dari paket Termux ke
       # jniLibs. Kalau mirror tidak terjangkau, build tetap sukses tanpa dukungan

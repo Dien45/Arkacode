@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.fileLeafName
-import com.arkacode.app.core.ArenaDownloadBridge
 import com.arkacode.app.net.FsEntry
 import com.arkacode.app.net.OpenCodeClient
 import kotlinx.coroutines.Job
@@ -168,22 +166,6 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     loadDir(cwd)
                 }) {
                     Icon(Icons.Default.Refresh, contentDescription = I18n.s.reloadFiles)
-                }
-                if (openedPath == null) {
-                    IconButton(onClick = {
-                        val context = LocalContext.current
-                        val filesDir = context.filesDir
-                        val imported = ArenaDownloadBridge.importDownloadsToWorkspace(
-                            context = context,
-                            filesDirFolder = filesDir,
-                            projectName = "default",
-                        )
-                        if (imported > 0) {
-                            loadDir(cwd)
-                        }
-                    }) {
-                        Icon(Icons.Default.Save, contentDescription = I18n.s.arenaImportDownloads)
-                    }
                 }
             }
             if (openedPath == null) {

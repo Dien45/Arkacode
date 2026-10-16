@@ -40,12 +40,6 @@ sampingnya, putih di atas biru brand `#5B9BE0`.
 - **Kapabilitas** — daftar agent, command, dan skill.
 - **Engine** — unduh binary opencode pinned (sha256), start/stop, health,
   auto-provisioning saat pertama buka, editor port & password server, log.
-- **Arena AI WebView** — buka [https://arena.ai/](https://arena.ai/) di dalam
-  aplikasi lewat WebView (tanpa API key, login lewat browser). Unduh
-  workspace/file dari Arena AI ke folder Downloads Android, lalu impor ke
-  workspace proot Arkacode via tombol "Impor dari Downloads" di layar Files.
-  Berkas akan muncul di `/root/workspace/<proyek>` di dalam proot, siap diedit,
-  di-commit, dan di-push ke GitHub.
 - **i18n ID/EN**, tema claymorphism terang/gelap persisten, backup rules.
 
 ## Arsitektur
@@ -123,9 +117,7 @@ android/app/src/main/java/com/arkacode/app/
   net/   OpenCodeClient · ServerModels
   ui/    ChatScreen · FilesScreen · ProvidersScreen · CapabilitiesScreen ·
          EngineScreen · SettingsScreen · IntegrationsSheet · ModelPickerSheet ·
-         MarkdownText · Clay · Theme · I18n · SlashSuggest ·
-         ArenaScreen
-  core/  ... · ArenaDownloadBridge
+         MarkdownText · Clay · Theme · I18n · SlashSuggest
 ```
 
 ## Status
