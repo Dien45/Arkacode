@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -49,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.fileLeafName
+import com.arkacode.app.core.ArenaDownloadBridge
 import com.arkacode.app.net.FsEntry
 import com.arkacode.app.net.OpenCodeClient
 import kotlinx.coroutines.Job
@@ -64,6 +66,7 @@ import kotlinx.coroutines.launch
 fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val client = remember(port, password) { OpenCodeClient(port = port, password = password) }
+    val filesContext = LocalContext.current
 
     var cwd by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf<List<FsEntry>?>(null) }
@@ -166,6 +169,42 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                     loadDir(cwd)
                 }) {
                     Icon(Icons.Default.Refresh, contentDescription = I18n.s.reloadFiles)
+                }
+                if (openedPath == null) {
+                    IconButton(onClick = {
+                        scope.launch {
+                            val imported = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                ArenaDownloadBridge.importDownloadsToWorkspace(
+                                    context = filesContext,
+                                    filesDirFolder = filesContext.filesDir,
+                                    projectName = "default",
+                                )
+                            }
+                            if (imported > 0) loadDir(cwd)
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = I18n.s.arenaImportDownloads,
+                        )
+                    }
+                }
+                IconButton(onClick = {
+                    val count = ArenaDownloadBridge.importDownloadsToWorkspace(
+                        filesContext,
+                        filesContext.filesDir,
+                        "default"
+                    )
+                    scope.launch {
+                        android.widget.Toast.makeText(
+                            filesContext,
+                            I18n.s.arenaImported(count),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    loadDir(cwd)
+                }) {
+                    Icon(Icons.Default.Download, contentDescription = I18n.s.arenaImportDownloads)
                 }
             }
             if (openedPath == null) {
