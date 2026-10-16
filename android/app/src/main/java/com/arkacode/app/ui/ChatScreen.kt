@@ -85,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.Attachment
 import com.arkacode.app.core.Attachments
 import com.arkacode.app.core.ImportResult
+import com.arkacode.app.core.ModelSupport
 import com.arkacode.app.core.PromptExpander
 import com.arkacode.app.core.SessionRunRegistry
 import com.arkacode.app.core.SlashSuggest
@@ -227,13 +228,24 @@ fun ChatScreen(
 
     LaunchedEffect(sessionId) {
         registry.attach(sessionId)
-        val pin = if (initialProviderID != null && initialModelID != null) {
+        val provided = if (initialProviderID != null && initialModelID != null) {
             ModelRef(initialProviderID, initialModelID)
         } else null
-        pinnedModel = pin
+        pinnedModel = provided
         runCatching { client.listAgents() }.getOrNull()?.let { agents = it.filter { a -> !a.hidden } }
         runCatching { client.listCommands() }.getOrNull()?.let { commands = it }
         runCatching { client.listSkills() }.getOrNull()?.let { skills = it }
+        // Sesi tanpa model / model `native` (tak didukung engine) dialihkan ke
+        // default yang didukung, agar kirim pesan pertama tak langsung error.
+        runCatching {
+            val models = client.listModels()
+            if (ModelSupport.needsDefault(provided?.providerID, provided?.id, models)) {
+                ModelSupport.pickDefault(models)?.let { m ->
+                    client.switchModel(sessionId, m.providerID, m.id)
+                    pinnedModel = ModelRef(m.providerID, m.id)
+                }
+            }
+        }
     }
     LaunchedEffect(messages.size) {
         val count = listState.layoutInfo.totalItemsCount
