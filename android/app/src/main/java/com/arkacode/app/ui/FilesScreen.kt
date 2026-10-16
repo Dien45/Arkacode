@@ -180,10 +180,6 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                         )
                         if (imported > 0) {
                             loadDir(cwd)
-                            val scope = rememberCoroutineScope()
-                            scope.launch {
-                                // Show a brief toast would need context; skip for now
-                            }
                         }
                     }) {
                         Icon(Icons.Default.Save, contentDescription = I18n.s.arenaImportDownloads)
