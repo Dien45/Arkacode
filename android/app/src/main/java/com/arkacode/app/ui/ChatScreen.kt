@@ -353,12 +353,16 @@ fun ChatScreen(
                         UserBubble(ChatItem.User("__echo__", echo, 0), onRevert = {})
                     }
                 }
+                val lastStoredAssistant = messages.filterIsInstance<ChatItem.Assistant>().lastOrNull()
+                val storedHasText = lastStoredAssistant?.texts?.any { it.isNotBlank() } == true
+                // Cadangan anti-blank: bila server belum/tidak menyimpan teks balasan
+                // padahal streaming sudah menerimanya, tetap tampilkan teks live itu
+                // walau turn sudah selesai (busy = false). Inilah yang membuat balasan
+                // tidak lagi "hilang" begitu status berubah jadi idle.
+                val showLiveFallback = liveText.isNotBlank() && !storedHasText
                 if (busy) {
                     item("typing") {
-                        val lastAssistant = messages.filterIsInstance<ChatItem.Assistant>().lastOrNull()
-                        val shownByMessages = liveText.isNotBlank() &&
-                            lastAssistant?.texts?.joinToString("\n")?.trimEnd()?.endsWith(liveText.trim()) == true
-                        if (liveText.isNotBlank() && !shownByMessages) {
+                        if (showLiveFallback) {
                             AssistantBubble(
                                 ChatItem.Assistant(
                                     id = "__live__",
@@ -383,6 +387,17 @@ fun ChatScreen(
                                 liveTools.forEach { t -> LiveToolCard(t) }
                             }
                         }
+                    }
+                } else if (showLiveFallback) {
+                    item("live-fallback") {
+                        AssistantBubble(
+                            ChatItem.Assistant(
+                                id = "__live__",
+                                texts = listOf(liveText),
+                                reasonings = listOf(liveReasoning).filter { it.isNotBlank() },
+                                tools = emptyList(),
+                            ),
+                        )
                     }
                 }
             }
@@ -750,6 +765,16 @@ private fun AssistantBubble(item: ChatItem.Assistant) {
                         err,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+                if (item.texts.isEmpty() && item.reasonings.isEmpty() &&
+                    item.tools.isEmpty() && item.error == null
+                ) {
+                    Text(
+                        I18n.s.emptyReply,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(4.dp))
                 }

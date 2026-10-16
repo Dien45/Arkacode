@@ -368,11 +368,22 @@ class OpenCodeClient(
 
     private fun parseMessage(item: JsonElement): ChatItem? {
         val o = item as? JsonObject ?: return null
-        val id = o.str("id") ?: return null
-        return when (o.str("type")) {
+        // Toleran dua bentuk: { id, type, content:[...] } (wrapper) maupun
+        // { info:{...}, parts:[...] } (MessageV2.WithParts).
+        val info = o["info"] as? JsonObject
+        val meta = info ?: o
+        val id = meta.str("id") ?: o.str("id") ?: return null
+        val kind = meta.str("type") ?: meta.str("role") ?: o.str("type") ?: o.str("role")
+        val parts = o.arr("content").ifEmpty { o.arr("parts") }
+            .ifEmpty { meta.arr("content").ifEmpty { meta.arr("parts") } }
+        return when (kind) {
             "user" -> {
-                val files = o.arr("files").size
-                val text = o.str("text") ?: ""
+                val files = o.arr("files").ifEmpty { meta.arr("files") }.size
+                val fromParts = parts.mapNotNull { p ->
+                    val po = p as? JsonObject ?: return@mapNotNull null
+                    if (po.str("type") == "text") po.str("text") else null
+                }.joinToString("\n")
+                val text = meta.str("text") ?: o.str("text") ?: fromParts
                 if (text.isBlank() && files == 0) null
                 else ChatItem.User(id, text, files)
             }
@@ -380,7 +391,7 @@ class OpenCodeClient(
                 val texts = mutableListOf<String>()
                 val reasonings = mutableListOf<String>()
                 val tools = mutableListOf<ToolUse>()
-                for (part in o.arr("content")) {
+                for (part in parts) {
                     val p = part as? JsonObject ?: continue
                     when (p.str("type")) {
                         "text" -> p.str("text")?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
@@ -391,15 +402,18 @@ class OpenCodeClient(
                         }
                     }
                 }
-                val finish = o.str("finish")
-                val err = o.obj("error").str("message")?.takeIf { it.isNotBlank() }
+                val finish = meta.str("finish") ?: o.str("finish")
+                val err = meta.obj("error").str("message")?.takeIf { it.isNotBlank() }
+                    ?: meta.str("error")?.takeIf { it.isNotBlank() }
+                    ?: o.obj("error").str("message")?.takeIf { it.isNotBlank() }
                     ?: o.str("error")?.takeIf { it.isNotBlank() }
                 val hasBody = texts.isNotEmpty() || reasonings.isNotEmpty() || tools.isNotEmpty()
                 if (!hasBody && err == null && finish == null) null
                 else ChatItem.Assistant(id, texts, reasonings, tools, finish, err)
             }
             "synthetic", "system" -> {
-                val text = o.str("text") ?: o.str("description") ?: return null
+                val text = meta.str("text") ?: meta.str("description")
+                    ?: o.str("text") ?: o.str("description") ?: return null
                 if (text.isBlank()) null else ChatItem.Note(id, text)
             }
             else -> null

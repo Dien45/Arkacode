@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -87,11 +88,28 @@ class SessionRunRegistry(
     private fun ensureEvents() {
         if (eventsJob?.isActive == true) return
         eventsJob = scope.launch {
-            client.serverEvents().collect { ev ->
-                val sid = ev.sessionID ?: return@collect
-                if (!runs.containsKey(sid)) return@collect
-                val r = run(sid)
-                when (ev) {
+            // Sambung ulang otomatis bila koneksi SSE putus: tanpa ini streaming
+            // berhenti diam-diam dan balasan hanya mengandalkan polling.
+            while (isActive) {
+                try {
+                    client.serverEvents().collect { ev -> applyEvent(ev) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // koneksi SSE putus — coba sambung lagi di bawah
+                }
+                if (!isActive) break
+                delay(SSE_RETRY_MS)
+            }
+        }
+    }
+
+    /** Terapkan satu event SSE ke state run terkait. */
+    private fun applyEvent(ev: ServerEvent) {
+        val sid = ev.sessionID ?: return
+        if (!runs.containsKey(sid)) return
+        val r = run(sid)
+        when (ev) {
                     is ServerEvent.Tool -> {
                         if (ev.label.isNotBlank()) r.toolLabel.value = ev.label
                         if (ev.status.isNotBlank()) {
@@ -122,8 +140,6 @@ class SessionRunRegistry(
                     is ServerEvent.Error -> r.error.value = ev.message
                     else -> {}
                 }
-            }
-        }
     }
 
     fun clearError(sessionId: String) {
@@ -192,17 +208,45 @@ class SessionRunRegistry(
     private suspend fun pollUntilDone(sessionId: String) {
         val r = run(sessionId)
         var waited = 0L
+        var fetchFails = 0
+        var lastErr: String? = null
         try {
             while (true) {
-                runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
+                val loaded = try {
+                    client.listMessages(sessionId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastErr = e.message
+                    null
+                }
+                if (loaded != null) {
+                    r.messages.value = loaded
+                    fetchFails = 0
+                } else if (++fetchFails >= MAX_FETCH_FAILS) {
+                    r.error.value = lastErr ?: "Tidak dapat memuat pesan dari server"
+                }
                 runCatching { client.listPermissions(sessionId) }.getOrNull()?.let { r.pending.value = it }
                 runCatching { client.listQuestions(sessionId) }.getOrNull()?.let { r.questions.value = it }
                 val newAssistant = r.messages.value
                     .filterIsInstance<ChatItem.Assistant>()
                     .lastOrNull { it.id !in r.preIds }
-                val done = newAssistant != null && isTerminal(newAssistant.finish)
-                if (done) {
-                    newAssistant.error?.takeIf { it.isNotBlank() }?.let { r.error.value = it }
+                if (newAssistant != null && isTerminal(newAssistant.finish)) {
+                    // Tunggu singkat sampai server menuntaskan penyimpanan isi
+                    // balasan — menghindari bubble kosong karena pesan tersimpan
+                    // belum lengkap tepat saat `finish` muncul.
+                    var settle = 0
+                    var asst: ChatItem.Assistant = newAssistant
+                    while (settle < SETTLE_TRIES && !hasBody(asst)) {
+                        delay(SETTLE_MS)
+                        runCatching { client.listMessages(sessionId) }.getOrNull()
+                            ?.let { r.messages.value = it }
+                        asst = r.messages.value
+                            .filterIsInstance<ChatItem.Assistant>()
+                            .lastOrNull { it.id !in r.preIds } ?: asst
+                        settle++
+                    }
+                    asst.error?.takeIf { it.isNotBlank() }?.let { r.error.value = it }
                     break
                 }
                 if (waited >= MAX_POLL_MS) break
@@ -216,9 +260,16 @@ class SessionRunRegistry(
             r.justSent.value = null
             r.toolLabel.value = null
             r.liveTools.value = emptyList()
+            // liveText sengaja TIDAK dibersihkan di sini: ChatScreen memakainya
+            // sebagai cadangan bila pesan tersimpan tak memuat teks balasan.
             runCatching { client.listMessages(sessionId) }.getOrNull()?.let { r.messages.value = it }
         }
     }
+
+    /** Pesan assistant punya isi (teks/reasoning/tool) — bukan bubble kosong. */
+    private fun hasBody(item: ChatItem.Assistant?): Boolean =
+        item != null &&
+            (item.texts.any { it.isNotBlank() } || item.reasonings.isNotEmpty() || item.tools.isNotEmpty())
 
     /**
      * Kunci id pesan "sebelum turn ini". Assistant terakhir yang belum selesai
@@ -239,5 +290,9 @@ class SessionRunRegistry(
     private companion object {
         const val POLL_MS = 1500L
         const val MAX_POLL_MS = 30 * 60 * 1000L
+        const val SSE_RETRY_MS = 2000L
+        const val SETTLE_TRIES = 8
+        const val SETTLE_MS = 700L
+        const val MAX_FETCH_FAILS = 5
     }
 }
