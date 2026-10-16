@@ -38,6 +38,11 @@ sampingnya, putih di atas biru brand `#5B9BE0`.
 - **Integrasi** — hubungkan via API key atau OAuth (buka tautan → poll/tempel
   kode → selesai), kredensial tersimpan di server.
 - **Kapabilitas** — daftar agent, command, dan skill.
+- **Arena AI** — WebView bawaan ke <https://arena.ai/> (login lewat browser,
+  cookie & localStorage disimpan internal WebView → sesi login tetap walau app
+  ditutup). Unduhan dari halaman web masuk ke folder `Download` Android, lalu
+  dapat diimpor ke workspace proot via tombol **Impor dari Downloads** di layar
+  Files. Tanpa API key, tanpa logika AI di sisi app.
 - **Engine** — unduh binary opencode pinned (sha256), start/stop, health,
   auto-provisioning saat pertama buka, editor port & password server, log.
 - **i18n ID/EN**, tema claymorphism terang/gelap persisten, backup rules.
@@ -47,7 +52,8 @@ sampingnya, putih di atas biru brand `#5B9BE0`.
 ```
 ┌─ APP (Kotlin + Compose, frontend murni) ──────────────┐
 │ UI: Chat · Sessions · Files · Agents · MCP ·          │
-│     Providers/Auth · Config · Approvals · Diff        │
+│     Providers/Auth · Config · Approvals · Diff ·      │
+│     Arena AI (WebView)                                │
 │                          │ HTTP 127.0.0.1:4096        │
 │ EngineManager: install/update binary, start/stop,     │
 │ health, basic-auth, working dir, log                  │
@@ -110,14 +116,14 @@ distro/`run_command` tidak aktif.
 ```
 android/app/src/main/java/com/arkacode/app/
   ArkacodeApp.kt · MainActivity.kt
-  core/  EngineManager · DistroManager · ExecRunner · ExecSettings ·
-         SecureStore · GitCredentials · OpenCodeConfig · Attachments ·
-         PromptExpander · SlashSuggest · SessionRunRegistry ·
-         SessionUiPrefs · VirtualFs
+  core/  EngineManager · EngineRelease · DistroManager · ExecRunner ·
+         ExecSettings · SecureStore · GitCredentials · OpenCodeConfig ·
+         Attachments · ArenaDownloadBridge · PromptExpander · SlashSuggest ·
+         SessionRunRegistry · SessionUiPrefs · VirtualFs
   net/   OpenCodeClient · ServerModels
   ui/    ChatScreen · FilesScreen · ProvidersScreen · CapabilitiesScreen ·
-         EngineScreen · SettingsScreen · IntegrationsSheet · ModelPickerSheet ·
-         MarkdownText · Clay · Theme · I18n · SlashSuggest
+         EngineScreen · ArenaScreen · SettingsScreen · IntegrationsSheet ·
+         ModelPickerSheet · MarkdownText · Clay · Theme · I18n · SlashSuggest
 ```
 
 ## Status
@@ -127,7 +133,8 @@ Ringkas (detail di [`PRD.md`](PRD.md) §8):
 - **Selesai**: engine + auto-provisioning, chat (SSE, abort, approval, model
   per sesi, markdown), sessions, files, providers + API key, provider kustom
   OpenAI-compatible, integrasi (OAuth/API key), kapabilitas (agent/command/
-  skill), i18n ID/EN, tema clay terang/gelap, backup rules, CI debug + release.
+  skill), **Arena AI (WebView + impor unduhan)**, i18n ID/EN, tema clay
+  terang/gelap, backup rules, CI debug + release.
 - **Belum** (keterbatasan server v1.19, bukan app): editor tulis
   `opencode.json` berformulir, MCP/share/fork/summarize.
 

@@ -1,6 +1,6 @@
 # PRD — Frontend Android untuk OpenCode (engine 100% opencode)
 
-Status: F0+F1 selesai di `main` · Dibuat: 2026-10-13 · Diperbarui: 2026-10-14
+Status: F0+F1 selesai di `main` · Dibuat: 2026-10-13 · Diperbarui: 2026-10-16
 Keputusan terkunci: engine on-device (proot Alpine) · repo baru terpisah dari Arka · paritas fitur penuh · sistem khas Arka dibuang · Arka lama tidak disentuh.
 
 ## 1. Latar & Tujuan
@@ -109,11 +109,12 @@ Sudah:
 - SSE penuh: `serverEvents()` mengurai event semantik (`session.status` idle/retry/busy, `session.text/reasoning.delta|ended`, `session.tool.*`, `permission.v2.*`, V1 `message.*`), bubble asisten live + label tool, dedup vs pesan tersimpan; polling tetap jaring pengaman.
 - Layar Penyedia AI: daftar provider + model (badge Gratis), isi/hapus API key per provider (terenkripsi, disuntik sebagai env saat serve nyala).
 - Files UI: tree/baca/cari + preview (markdown/gambar) via `/api/fs/*`.
-- Navbar bawah (Sesi | AI | Kapabilitas); header aman status-bar; tema claymorphism terang/gelap persisten.
+- Navbar bawah (Sesi | AI | Kapabilitas | Setelan | Arena AI); header aman status-bar; tema claymorphism terang/gelap persisten.
 - Layar Kapabilitas: daftar agent (`GET /api/agent`), perintah (`GET /api/command`), skill (`GET /api/skill`).
 - Chat F3: pemilih agent per sesi (`POST /api/session/:id/agent`), palet perintah (sisip `/nama`), ringkas (`POST .../compact`), revert+dif berkas (`POST .../revert/stage|commit|clear`, menampilkan patch per file).
 - i18n ID/EN: `I18n` (state Compose → recompose otomatis) + `Strings` data class ID/EN; toggle bahasa di header layar siap; pref persisten di `SessionUiPrefs`. Teks UI chat, files, penyedia, model, kapabilitas, integrasi, dan sesi dua bahasa.
 - Integrasi server (`/api/integration`): daftar integrasi + metode (oauth/key/env); hubungkan via API key atau OAuth Zen end-to-end (buka tautan, poll status utk mode auto, tempel kode utk mode code, selesaikan/batalkan). Kredensial tersimpan di server; Stop → Start agar berlaku. Misi: `IntegrationsSheet` dari layar Penyedia.
+- Arena AI (WebView): item navbar ke-5 membuka `ArenaScreenActivity` — WebView penuh ke <https://arena.ai/> (JS + DOM storage, cookie pihak ketiga, user-agent mobile) dengan persistensi login via `CookieManager`. Unduhan dari halaman ditangkap `DownloadListener` → `DownloadManager` ke folder `Download` publik. `ArenaDownloadBridge` mengimpor berkas dari `Download` ke workspace proot, dipicu tombol **Impor dari Downloads** di layar Files. String i18n ID/EN (`arenaTitle/Subtitle/Open/ImportDownloads/Imported`).
 
 Belum:
 - Config editor (bilah berkas opencode.json) — tanpa endpoint tulis fs di v1.19.
