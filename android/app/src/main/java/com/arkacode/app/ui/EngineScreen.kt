@@ -547,7 +547,7 @@ private fun ReadyScreen(
                 ClayNavItem(Icons.Default.SmartToy, I18n.s.navAI, selected = false, onClick = onOpenProviders),
                 ClayNavItem(Icons.Default.Build, I18n.s.navCaps, selected = false, onClick = onOpenCapabilities),
                 ClayNavItem(Icons.Default.Settings, I18n.s.navSettings, selected = false, onClick = onOpenSettings),
-                ClayNavItem(Icons.Default.Link, I18n.s.arenaTitle, selected = false, onClick = {
+                ClayNavItem(Icons.Default.OpenInNew, I18n.s.arenaTitle, selected = false, onClick = {
                     context.startActivity(Intent(context, ArenaScreenActivity::class.java))
                 }),
             ),

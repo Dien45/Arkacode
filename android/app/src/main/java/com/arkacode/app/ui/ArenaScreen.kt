@@ -134,17 +134,6 @@ fun ArenaWebView() {
         }
     }
 
-    // Tombol back Android → kembali ke halaman sebelumnya di WebView.
-    // Jika sudah di halaman pertama, keluar layar Arena.
-    onBackPressedDispatcherOwner?.onBackPressedDispatcher?.addCallback {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            setResult(RESULT_CANCELED)
-            finish()
-        }
-    }
-
     AndroidView(
         factory = { webView },
         modifier = Modifier.fillMaxSize()
