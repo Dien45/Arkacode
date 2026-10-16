@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -109,8 +111,17 @@ private val ClayDark = darkColorScheme(
 fun ArkacodeTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (darkTheme) ClayDark else ClayLight,
-        content = content,
-    )
+    ) {
+        // Surface akar: tanpa ini, layar yang tak mengecat background sendiri
+        // (Ready/Boot/Stopped) memperlihatkan window background tema Light —
+        // kanvas tetap terang walau mode gelap.
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            content()
+        }
+    }
 }
 
 /** Bentuk clay standar: sudut besar. */
