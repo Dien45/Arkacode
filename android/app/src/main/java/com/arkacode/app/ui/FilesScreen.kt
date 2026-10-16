@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -184,7 +185,7 @@ fun FilesPane(port: Int, password: String, modifier: Modifier = Modifier) {
                         }
                     }) {
                         Icon(
-                            Icons.Default.Refresh,
+                            Icons.Default.Save,
                             contentDescription = I18n.s.arenaImportDownloads,
                         )
                     }
