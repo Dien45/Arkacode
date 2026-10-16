@@ -2,6 +2,7 @@ package com.arkacode.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -32,6 +33,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val dark = themeOverride?.let { it == "dark" } ?: systemDark
+            // Ikon & scrim status/nav bar harus mengikuti TEMA APLIKASI, bukan
+            // tebakan uiMode sistem (enableEdgeToEdge() polos di onCreate bisa
+            // salah arah ketika tema aplikasi ≠ tema sistem).
+            LaunchedEffect(dark) {
+                val transparent = android.graphics.Color.TRANSPARENT
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) {
+                        SystemBarStyle.dark(transparent)
+                    } else {
+                        SystemBarStyle.light(transparent, transparent)
+                    },
+                    navigationBarStyle = if (dark) {
+                        SystemBarStyle.dark(transparent)
+                    } else {
+                        SystemBarStyle.light(transparent, transparent)
+                    },
+                )
+            }
             ArkacodeTheme(darkTheme = dark) {
                 EngineScreen(
                     darkTheme = dark,
