@@ -103,6 +103,29 @@ Catatan: task `downloadProotBinaries` mengunduh binary proot (paket Termux) ke
 `jniLibs`. Bila mirror tidak terjangkau, build tetap sukses tetapi fitur
 distro/`run_command` tidak aktif.
 
+### Update di tempat (tanpa uninstall)
+
+Semua APK dari CI ditandatangani dengan **keystore bersama** yang ikut di repo
+(`android/arkacode.keystore` + `android/keystore.properties`). Sebelumnya build
+debug CI memakai debug keystore acak yang berbeda tiap run → tanda tangan tidak
+cocok → Android menolak update dan memaksa uninstall. Dengan kunci tetap,
+build berikutnya meng-upgrade instalasi lama langsung:
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+`versionCode` naik otomatis dari nomor run CI (`GITHUB_RUN_NUMBER`), jadi sistem
+mengenali tiap build sebagai versi lebih baru.
+
+> **Sekali saja:** instalasi lama (dibuat sebelum kunci bersama ini ada) memakai
+> debug keystore acak yang berbeda, jadi transisi pertama masih perlu uninstall
+> dulu — `adb uninstall com.arkacode.app` — lalu pasang APK baru. Setelah itu
+> semua update berikutnya lancar tanpa uninstall.
+
+> Keystore bersama ini untuk CI/dev, **bukan** kunci rilis Play. Rilis produksi
+> memakai keystore sendiri via GitHub Secrets (`.github/workflows/android-release.yml`).
+
 ## CI & alur kontribusi
 
 - **CI**: `.github/workflows/build-android-apk.yml` menjalankan

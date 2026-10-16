@@ -6,6 +6,22 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// ---------------------------------------------------------------------------
+// Penandatanganan APK (agar bisa di-upgrade di tempat, tanpa uninstall).
+//
+// `keystore.properties` di root project (android/) menyimpan kunci penandatangan:
+// - Di repo ini: keystore bersama (committed) supaya SEMUA build CI memakai kunci
+//   yang sama. Sebelumnya build debug CI memakai debug keystore acak yang berbeda
+//   tiap run → tanda tangan tak cocok → Android menolak update (wajib uninstall).
+// - Di CI rilis (tag v*): file ini ditulis ulang dari GitHub Secrets (kunci rilis).
+// ---------------------------------------------------------------------------
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = java.util.Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+val hasSigning = keystorePropsFile.exists() &&
+    keystoreProps.getProperty("storeFile")?.let { rootProject.file(it).exists() } == true
+
 android {
     namespace = "com.arkacode.app"
     compileSdk = 35
@@ -14,14 +30,30 @@ android {
         applicationId = "com.arkacode.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Naik tiap build CI (GITHUB_RUN_NUMBER) → update dikenali sistem.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionName = "0.2.0"
+    }
+
+    signingConfigs {
+        if (hasSigning) {
+            create("arkacode") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            if (hasSigning) signingConfig = signingConfigs.getByName("arkacode")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasSigning) signingConfig = signingConfigs.getByName("arkacode")
         }
     }
 
