@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -42,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +54,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.arkacode.app.core.SessionUiPrefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val ARENA_URL = "https://arena.ai/"
 
@@ -108,9 +113,18 @@ class ArenaScreenActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        // Sama seperti MainActivity: baca tema tersimpan (default ikut sistem)
+        // agar Arena AI ikut mode gelap, bukan selalu skema terang default.
         setContent {
-            MaterialTheme {
+            val systemDark = isSystemInDarkTheme()
+            var themeOverride by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Unit) {
+                themeOverride = withContext(Dispatchers.IO) {
+                    runCatching { SessionUiPrefs(this@ArenaScreenActivity).themeMode() }.getOrNull()
+                }
+            }
+            val dark = themeOverride?.let { it == "dark" } ?: systemDark
+            ArkacodeTheme(darkTheme = dark) {
                 ArenaWebView(onClose = { finish() })
             }
         }
